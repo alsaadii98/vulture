@@ -2,10 +2,10 @@
 // Copyright (C) 2026 Vulture contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#if DEBUG
 import AppKit
 import SwiftUI
 
+#if DEBUG
 /// Development builds only: launch options for checking screens without clicking through them.
 ///   open build/Vulture.app --args -VultureSection storage -VultureAppearance light
 ///   -VulturePreview settings | menubar      (with -settingsTab safety)
