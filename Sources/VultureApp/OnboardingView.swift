@@ -117,7 +117,3 @@ struct OnboardingView: View {
         Task { await model.scan() }
     }
 }
-
-func openPrivacySettings() {
-    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
-}

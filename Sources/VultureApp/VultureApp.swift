@@ -29,22 +29,43 @@ struct VultureApp: App {
                 CheckForUpdatesButton().environment(updates)
             }
             CommandGroup(after: .newItem) {
-                Button("Check Again") { Task { await model.scan() } }
+                Button("Scan Again") { Task { await model.scan() } }
                     .keyboardShortcut("r")
             }
             CommandMenu("Clean") {
+                Button("Scan Again") { Task { await model.scan() } }
+                Divider()
+                Button("Review Clean Up") { model.section = .clean }
                 Button("Clean Up Selected…") {
                     model.section = .clean
                     model.confirmingClean = true
                 }
-                    .keyboardShortcut(.delete, modifiers: .command)
-                    .disabled(model.selection.isEmpty)
+                .keyboardShortcut(.delete, modifiers: .command)
+                .disabled(model.selection.isEmpty)
+                Button("Select All Safe Items") { model.selectAllSafe() }
+                    .keyboardShortcut("a", modifiers: [.command, .option])
+                    .disabled(model.plan == nil)
+                Button("Skip Item") { model.skipFocused() }
+                    .disabled(model.focusedPath.map { !model.selection.contains($0) } ?? true)
+                Divider()
+                Button("Show in Finder") { model.revealFocused() }
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
+                    .disabled(model.focusedPath == nil)
+                Button("Show in Storage Map") { model.showFocusedInMap() }
+                    .keyboardShortcut("d")
+                    .disabled(model.focusedPath == nil)
                 Divider()
                 Button("Open Recently Removed") { model.section = .removed }
                     .keyboardShortcut(.delete, modifiers: [.command, .shift])
+                Button("Empty Recently Removed…") { model.confirmingEmpty = true }
+                    .disabled(model.batches.isEmpty)
+                Divider()
+                Button("Undo Clean Up") { model.undoLastClean() }
+                    .keyboardShortcut("z")
+                    .disabled(model.lastCleanBatch == nil)
             }
             CommandGroup(before: .sidebar) {
-                ForEach(Array(SidebarSection.allCases.enumerated()), id: \.element) { index, section in
+                ForEach(Array(model.visibleSections.enumerated()), id: \.element) { index, section in
                     Button(section.title) { model.section = section }
                         .keyboardShortcut(KeyEquivalent(Character(String(index + 1))))
                 }

@@ -18,10 +18,9 @@ struct ContentView: View {
     }
 
     private var main: some View {
-        @Bindable var model = model
-        return NavigationSplitView {
+        NavigationSplitView {
             Sidebar()
-                .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
+                .navigationSplitViewColumnWidth(min: 210, ideal: 232, max: 280)
         } detail: {
             Group {
                 switch model.section ?? .home {
@@ -32,8 +31,11 @@ struct ContentView: View {
                 case .apps: AppsView()
                 case .storage: StorageView()
                 case .startup: StartupView()
+                case .storageMap: StorageMapView()
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .screenBackground()
             .transition(.opacity)
             .animation(.easeOut(duration: 0.2), value: model.section)
         }
@@ -46,112 +48,75 @@ struct ContentView: View {
     }
 }
 
+/// The design's sidebar: colored icons, sizes on the right, and how full the disk is at the bottom.
+/// On macOS 26 the system draws it as a floating Liquid Glass panel.
 struct Sidebar: View {
     @Environment(AppModel.self) private var model
     @AppStorage("showDeveloperFiles") private var showDeveloperFiles = true
+    @AppStorage("showStorageMap") private var showStorageMap = false
 
     var body: some View {
         @Bindable var model = model
         List(selection: $model.section) {
-            ForEach([SidebarSection.home, .clean, .apps, .storage, .startup]) { row($0) }
-            Divider()
-            row(.removed)
-            if showDeveloperFiles {
-                Section("Extra Tools") { row(.developer) }
+            Section {
+                ForEach([SidebarSection.home, .clean, .apps, .storage, .startup]) { row($0) }
             }
-        }
-        .safeAreaInset(edge: .bottom) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("Macintosh HD").foregroundStyle(.secondary)
-                    Spacer()
-                    Text("\(formatBytes(model.freeBytes)) free").fontWeight(.semibold).monospacedDigit()
+            Section {
+                row(.removed)
+            }
+            if showDeveloperFiles || showStorageMap {
+                Section("Extra Tools") {
+                    if showDeveloperFiles { row(.developer) }
+                    if showStorageMap { row(.storageMap) }
                 }
-                .font(.caption)
-                ProgressView(value: model.usedFraction)
-                    .accessibilityLabel("\(Int(model.usedFraction * 100)) percent full")
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 12)
         }
+        .listStyle(.sidebar)
+        .safeAreaInset(edge: .bottom) { disk }
+    }
+
+    private var disk: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Macintosh HD").foregroundStyle(.secondary)
+                Spacer()
+                Text("\(formatBytes(model.freeBytes)) free").fontWeight(.semibold).monospacedDigit()
+            }
+            .font(.system(size: 12))
+            ThinBar(fraction: model.usedFraction)
+                .accessibilityLabel("Macintosh HD is \(Int(model.usedFraction * 100)) percent full")
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 14)
+        .padding(.top, 8)
     }
 
     private func row(_ section: SidebarSection) -> some View {
-        Label {
-            HStack {
-                Text(section.title)
-                Spacer()
-                if let badge = badge(section) {
-                    Text(badge).font(.caption).foregroundStyle(.secondary).monospacedDigit()
-                }
+        HStack(spacing: 10) {
+            IconTile(symbol: section.symbol, color: section.tint, size: 24)
+            Text(section.title).font(.system(size: 13))
+            Spacer(minLength: 4)
+            if let badge = badge(section) {
+                Text(badge).font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit()
             }
-        } icon: {
-            Image(systemName: section.symbol)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 22, height: 22)
-                .background(section.tint.gradient, in: RoundedRectangle(cornerRadius: 6))
         }
+        .padding(.vertical, 3)
         .tag(section)
     }
 
     private func badge(_ section: SidebarSection) -> String? {
         switch section {
-        case .clean where model.selectedBytes > 0: formatBytes(model.selectedBytes)
-        case .removed where !model.batches.isEmpty: formatBytes(model.batches.reduce(0) { $0 + $1.bytes })
+        case .clean where model.selectedBytes > 0: shortBytes(model.selectedBytes)
+        case .removed where !model.batches.isEmpty: shortBytes(model.batches.reduce(0) { $0 + $1.bytes })
         default: nil
         }
     }
 }
 
-struct ComingSoon: View {
-    let section: SidebarSection
-    let text: String
-
-    var body: some View {
-        ContentUnavailableView {
-            Label(section.title, systemImage: section.symbol)
-        } description: {
-            Text(text)
-            Text("Coming in a later version.").foregroundStyle(.tertiary)
-        }
-        .navigationTitle(section.title)
-    }
-}
-
-struct SettingsView: View {
-    @AppStorage("showDeveloperFiles") private var showDeveloperFiles = true
-    @AppStorage("notifyWhenLow") private var notifyWhenLow = true
-    @AppStorage("showMenuBarMonitor") private var showMenuBarMonitor = false
-    @AppStorage(UpdateModel.autoCheckKey) private var checkForUpdates = true
-    @Environment(UpdateModel.self) private var updates
-
-    var body: some View {
-        Form {
-            Section("Extra Tools in the Sidebar") {
-                Toggle("Developer Files", isOn: $showDeveloperFiles)
-                Text("Xcode, Docker and code packages.").font(.caption).foregroundStyle(.secondary)
-            }
-            Section("Menu Bar") {
-                Toggle("Show Vulture in the menu bar", isOn: $showMenuBarMonitor)
-                Text("A quick look at CPU, memory and free space, even when the window is closed.").font(.caption).foregroundStyle(.secondary)
-            }
-            Section("Reminders") {
-                Toggle("Tell me when there's a lot to clean", isOn: $notifyWhenLow)
-            }
-            Section("Updates") {
-                Toggle("Check for new versions every day", isOn: $checkForUpdates)
-                Text("Vulture asks before installing anything. Checking only reads a small file from GitHub. You have version \(updates.currentVersion).")
-                    .font(.caption).foregroundStyle(.secondary)
-                CheckForUpdatesButton()
-            }
-            Section {
-                Text("Vulture for Mac · Free and open source · Your files never leave this Mac.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-        }
-        .formStyle(.grouped)
-        .frame(width: 480)
-        .padding(.vertical)
-    }
+/// "26 GB" rather than "26.4 GB", for tight spots like the sidebar.
+func shortBytes(_ bytes: Int64) -> String {
+    let formatter = ByteCountFormatter()
+    formatter.countStyle = .file
+    formatter.isAdaptive = bytes < 10_000_000_000
+    return formatter.string(fromByteCount: bytes)
 }

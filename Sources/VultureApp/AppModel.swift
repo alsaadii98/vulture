@@ -8,7 +8,7 @@ import SwiftUI
 import VultureCore
 
 enum SidebarSection: String, CaseIterable, Identifiable {
-    case home, clean, apps, storage, startup, removed, developer
+    case home, clean, apps, storage, startup, removed, developer, storageMap
 
     var id: String { rawValue }
 
@@ -21,6 +21,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         case .startup: "Startup"
         case .removed: "Recently Removed"
         case .developer: "Developer Files"
+        case .storageMap: "Storage Map"
         }
     }
 
@@ -33,18 +34,19 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         case .startup: "gauge.with.needle.fill"
         case .removed: "arrow.uturn.backward"
         case .developer: "hammer.fill"
+        case .storageMap: "square.split.2x2.fill"
         }
     }
 
     var tint: Color {
         switch self {
-        case .home: .blue
-        case .clean: .green
-        case .apps: .purple
-        case .storage: .orange
-        case .startup: .pink
-        case .removed: .gray
-        case .developer: .indigo
+        case .home: Theme.blue
+        case .clean: Theme.mint
+        case .apps: Theme.purple
+        case .storage: Theme.amber
+        case .startup: Theme.pink
+        case .removed: Theme.gray
+        case .developer, .storageMap: Theme.teal
         }
     }
 }
@@ -58,6 +60,11 @@ final class AppModel {
     }
 
     var section: SidebarSection? = .home
+    /// The item the person last clicked in Clean Up or the Storage Map, for the Clean menu's
+    /// Show in Finder, Show in Storage Map and Skip Item.
+    var focusedPath: String?
+    /// Folder the Storage Map shows. Set before switching to it to open a folder.
+    var mapFolder: URL?
     /// Asks "Clean up?" before anything is touched.
     var confirmingClean = false
     var phase: Phase = .idle
@@ -396,6 +403,53 @@ final class AppModel {
     }
 
     func refreshRemoved() { batches = store.batches() }
+
+    // MARK: Menu commands
+
+    /// Asks "Empty Recently Removed?" (shown by the Recently Removed screen).
+    var confirmingEmpty = false
+
+    /// Sections shown in the sidebar, in order, for View › ⌘1…
+    var visibleSections: [SidebarSection] {
+        var list: [SidebarSection] = [.home, .clean, .apps, .storage, .startup, .removed]
+        if UserDefaults.standard.object(forKey: "showDeveloperFiles") as? Bool ?? true { list.append(.developer) }
+        if UserDefaults.standard.bool(forKey: "showStorageMap") { list.append(.storageMap) }
+        return list
+    }
+
+    func selectAllSafe() {
+        guard let plan else { return }
+        selection.formUnion(plan.defaultSelection)
+    }
+
+    func skipFocused() {
+        if let path = focusedPath { selection.remove(path) }
+    }
+
+    func revealFocused() {
+        guard let path = focusedPath else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+    }
+
+    func showFocusedInMap() {
+        guard let path = focusedPath else { return }
+        mapFolder = URL(fileURLWithPath: path).deletingLastPathComponent()
+        UserDefaults.standard.set(true, forKey: "showStorageMap")
+        section = .storageMap
+    }
+
+    /// The Recently Removed batch from the last clean-up, while it can still be put back.
+    var lastCleanBatch: String? {
+        guard case .done(let result) = phase, let id = result.batchID, batches.contains(where: { $0.id == id }) else { return nil }
+        return id
+    }
+
+    func undoLastClean() {
+        guard let id = lastCleanBatch else { return }
+        putBack(id)
+        phase = .idle
+        Task { await scan() }
+    }
 
     func refreshDisk() {
         let values = try? URL(fileURLWithPath: "/").resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeTotalCapacityKey])
