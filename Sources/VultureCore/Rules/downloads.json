@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "rules": [
+    {
+      "id": "downloads.installers",
+      "title": "Installers you already used",
+      "explanation": "Disk images and installer packages in Downloads. Once an app is installed, these setup files aren't needed.",
+      "category": "downloads",
+      "safety": "review",
+      "regrows": "never",
+      "paths": ["~/Downloads/*.dmg", "~/Downloads/*.pkg", "~/Downloads/*.mpkg"],
+      "minAgeDays": 7,
+      "priority": 10
+    },
+    {
+      "id": "downloads.old",
+      "title": "Downloads you haven't opened in a year",
+      "explanation": "Anything in Downloads that hasn't changed in a year. Look through these before you remove them.",
+      "category": "downloads",
+      "safety": "review",
+      "regrows": "never",
+      "paths": ["~/Downloads/*"],
+      "minAgeDays": 365,
+      "priority": -20
+    },
+    {
+      "id": "mail.downloads",
+      "title": "Mail attachments you opened",
+      "explanation": "Copies Mail makes when you open an attachment. The original stays in the email, so you can open it again.",
+      "category": "mail",
+      "safety": "safe",
+      "regrows": "onNextUse",
+      "paths": ["~/Library/Containers/com.apple.mail/Data/Library/Mail Downloads/*"],
+      "minAgeDays": 30
+    }
+  ]
+}

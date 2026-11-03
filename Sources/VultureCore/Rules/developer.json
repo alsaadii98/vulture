@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "rules": [
+    {
+      "id": "xcode.derived-data",
+      "title": "Xcode build files",
+      "explanation": "Xcode keeps a copy of every project it builds so the next build is faster. It makes them again the next time you build.",
+      "category": "developer",
+      "safety": "safe",
+      "regrows": "onNextBuild",
+      "paths": ["~/Library/Developer/Xcode/DerivedData/*"],
+      "closeFirst": ["com.apple.dt.Xcode"]
+    },
+    {
+      "id": "xcode.archives",
+      "title": "Old Xcode app archives",
+      "explanation": "Finished builds you made to share or publish an app. You can't get these back, so look before removing.",
+      "category": "developer",
+      "safety": "review",
+      "regrows": "never",
+      "paths": ["~/Library/Developer/Xcode/Archives/*"],
+      "minAgeDays": 90
+    },
+    {
+      "id": "xcode.device-support",
+      "title": "Old iPhone debugging files",
+      "explanation": "Xcode copies these from each iPhone or iPad you connect. It copies them again if you connect that device later.",
+      "category": "developer",
+      "safety": "review",
+      "regrows": "onNextUse",
+      "paths": [
+        "~/Library/Developer/Xcode/iOS DeviceSupport/*",
+        "~/Library/Developer/Xcode/watchOS DeviceSupport/*",
+        "~/Library/Developer/Xcode/tvOS DeviceSupport/*"
+      ],
+      "minAgeDays": 90,
+      "closeFirst": ["com.apple.dt.Xcode"]
+    },
+    {
+      "id": "xcode.simulator-caches",
+      "title": "Simulator temporary files",
+      "explanation": "Files the iPhone simulator keeps to start faster. It makes them again when needed.",
+      "category": "developer",
+      "safety": "safe",
+      "regrows": "onNextUse",
+      "paths": ["~/Library/Developer/CoreSimulator/Caches/*"],
+      "closeFirst": ["com.apple.iphonesimulator"]
+    },
+    {
+      "id": "packages.npm",
+      "title": "Downloaded npm packages",
+      "explanation": "Copies of JavaScript packages npm downloaded before. npm downloads them again when a project needs them.",
+      "category": "developer",
+      "safety": "safe",
+      "regrows": "onNextInstall",
+      "paths": ["~/.npm/_cacache"]
+    },
+    {
+      "id": "packages.yarn",
+      "title": "Downloaded Yarn packages",
+      "explanation": "Copies of JavaScript packages Yarn downloaded before. Yarn downloads them again when a project needs them.",
+      "category": "developer",
+      "safety": "safe",
+      "regrows": "onNextInstall",
+      "paths": ["~/Library/Caches/Yarn/*"]
+    },
+    {
+      "id": "packages.pnpm",
+      "title": "Shared pnpm packages",
+      "explanation": "pnpm keeps one shared copy of every package your projects use. Removing it makes the next install download everything again.",
+      "category": "developer",
+      "safety": "review",
+      "regrows": "onNextInstall",
+      "paths": ["~/Library/pnpm/store", "~/Library/Caches/pnpm/*"]
+    },
+    {
+      "id": "packages.homebrew",
+      "title": "Homebrew downloads",
+      "explanation": "Installers Homebrew already used. Homebrew downloads them again only if it needs to reinstall something.",
+      "category": "developer",
+      "safety": "safe",
+      "regrows": "onNextInstall",
+      "paths": ["~/Library/Caches/Homebrew/*"],
+      "exclude": ["Cask"]
+    },
+    {
+      "id": "packages.pip",
+      "title": "Downloaded Python packages",
+      "explanation": "Copies of Python packages pip downloaded before. pip downloads them again when needed.",
+      "category": "developer",
+      "safety": "safe",
+      "regrows": "onNextInstall",
+      "paths": ["~/Library/Caches/pip/*"]
+    },
+    {
+      "id": "packages.go-build",
+      "title": "Go build files",
+      "explanation": "Go saves compiled pieces to build faster. It makes them again the next time you build.",
+      "category": "developer",
+      "safety": "safe",
+      "regrows": "onNextBuild",
+      "paths": ["~/Library/Caches/go-build/*"]
+    },
+    {
+      "id": "packages.cargo",
+      "title": "Downloaded Rust packages",
+      "explanation": "Copies of Rust packages Cargo downloaded before. Cargo downloads them again when a project needs them.",
+      "category": "developer",
+      "safety": "safe",
+      "regrows": "onNextInstall",
+      "paths": ["~/.cargo/registry/cache/*"]
+    },
+    {
+      "id": "packages.gradle",
+      "title": "Gradle downloads and build files",
+      "explanation": "Libraries and build pieces Gradle saved for Android and Java projects. The next build downloads what it needs again, which can take a while.",
+      "category": "developer",
+      "safety": "review",
+      "regrows": "onNextBuild",
+      "paths": ["~/.gradle/caches"]
+    }
+  ]
+}

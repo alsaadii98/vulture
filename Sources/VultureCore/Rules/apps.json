@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "rules": [
+    {
+      "id": "apps.caches",
+      "title": "Temporary app files",
+      "explanation": "Files apps keep so they open faster. Apps make new ones when they need them.",
+      "category": "appFiles",
+      "safety": "safe",
+      "regrows": "onNextUse",
+      "paths": ["~/Library/Caches/*"],
+      "exclude": ["com.apple.*", "CloudKit", "FamilyCircle", "Homebrew", "pip", "Yarn", "pnpm", "go-build", "JetBrains"],
+      "entryNameIsBundleID": true,
+      "priority": -10
+    },
+    {
+      "id": "apps.logs",
+      "title": "Old activity records",
+      "explanation": "Notes apps write about what they did, including crash reports. Only records untouched for two weeks are offered.",
+      "category": "logs",
+      "safety": "safe",
+      "regrows": "onNextUse",
+      "paths": ["~/Library/Logs/*"],
+      "minAgeDays": 14,
+      "priority": -10
+    }
+  ]
+}
