@@ -5,11 +5,9 @@
 import Foundation
 
 public enum Remover {
-    /// Deletes `url` and everything inside it without following symbolic links.
+    /// Deletes `url` and everything inside it. Links inside are removed as links; what they point to is untouched.
     public static func removeForGood(_ url: URL) throws {
-        if removefile(url.path, nil, removefile_flags_t(REMOVEFILE_RECURSIVE)) != 0 {
-            throw RecentlyRemovedError.system(url.path, errno)
-        }
+        try FileManager.default.removeItem(at: url)
     }
 }
 

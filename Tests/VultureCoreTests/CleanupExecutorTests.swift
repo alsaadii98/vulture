@@ -77,6 +77,17 @@ import Testing
         #expect(batch.items.map(\.originalPath) == [fx.url("Downloads/Setup.dmg").standardizedFileURL.path])
     }
 
+    @Test func deletingAFolderNeverFollowsLinksInsideIt() throws {
+        try fx.file("Documents/precious.txt")
+        try fx.file("Library/Caches/com.example.App/blob")
+        try fx.link("Library/Caches/com.example.App/shortcut", to: fx.url("Documents").path)
+        let p = plan([cacheRule])
+        let result = executor().run(p, selected: everything(p))
+        #expect(result.failures.isEmpty)
+        #expect(!Glob.exists(fx.url("Library/Caches/com.example.App")))
+        #expect(Glob.exists(fx.url("Documents/precious.txt")))
+    }
+
     @Test func onlyTouchesWhatWasSelected() throws {
         try fx.file("Library/Caches/com.example.A/x")
         try fx.file("Library/Caches/com.example.B/x")
