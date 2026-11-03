@@ -61,13 +61,19 @@ jobs:
             # codesign only uses a trusted certificate. Trust it on this throwaway runner, for code signing only.
             openssl pkcs12 -in "$RUNNER_TEMP/cert.p12" -passin env:OWN_P12_PASSWORD -nokeys -clcerts -out "$RUNNER_TEMP/cert.pem" \
               || openssl pkcs12 -legacy -in "$RUNNER_TEMP/cert.p12" -passin env:OWN_P12_PASSWORD -nokeys -clcerts -out "$RUNNER_TEMP/cert.pem"
-            sudo security authorizationdb write com.apple.trust-settings.admin allow
-            sudo security add-trusted-cert -d -r trustRoot -p codeSign -k "$keychain" "$RUNNER_TEMP/cert.pem"
+            # Admin trust (needs no prompt as root on most runner images), else this user's trust.
+            sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain "$RUNNER_TEMP/cert.pem" \
+              || security add-trusted-cert -r trustRoot -p codeSign -k "$keychain" "$RUNNER_TEMP/cert.pem" \
+              || echo "Couldn't add trust settings."
             echo "VULTURE_SIGN_IDENTITY=Vulture Release Signing" >> "$GITHUB_ENV"
           fi
           security set-key-partition-list -S apple-tool:,apple: -s -k "" "$keychain" > /dev/null
           rm -f "$RUNNER_TEMP/cert.p12"
           security find-identity -v -p codesigning "$keychain"
+          if [ -n "$OWN_P12" ] && [ -z "$DEVID_P12" ]; then
+            security find-identity -v -p codesigning "$keychain" | grep -q "Vulture Release Signing" \
+              || { echo "The release certificate isn't usable for signing on this runner."; exit 1; }
+          fi
       - name: Build release
         run: scripts/release.sh "${GITHUB_REF_NAME#v}"
       - name: Show signature
