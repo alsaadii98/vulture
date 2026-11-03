@@ -9,10 +9,15 @@ import VultureCore
 let version = "0.1.0-dev"
 
 let usage = """
-    vulture \(version): see what's filling up your Mac. Nothing is ever removed by this version.
+    vulture \(version): see what's filling up your Mac, and free up space without the worry.
 
     Usage:
       vulture scan [--json] [--rules DIR]     Find files that can be cleaned up, and explain each one
+      vulture clean [--include RULE]... [--yes] [--json]
+                                              Clean up the recommended items (add "you decide" rules with --include)
+      vulture removed [--json]                List what's in Recently Removed
+      vulture restore ID [--yes]              Put back everything from one clean-up
+      vulture empty [--all] [--yes]           Remove expired clean-ups for good (--all: everything)
       vulture size [PATH] [--json] [--top N]  Measure a folder (default: your home folder)
       vulture rules [--json] [--rules DIR]    List the cleaning rules
       vulture check-rules DIR                 Check rule files for mistakes (for contributors)
@@ -177,6 +182,109 @@ func checkRules() throws {
     print("\(rules.count) rules, no problems found.")
 }
 
+func confirm(_ question: String) -> Bool {
+    if flag("--yes") { return true }
+    print("\(question) Type yes to continue: ", terminator: "")
+    return readLine()?.trimmingCharacters(in: .whitespaces).lowercased() == "yes"
+}
+
+func options(_ name: String) throws -> [String] {
+    var values: [String] = []
+    while let v = try option(name) { values.append(v) }
+    return values
+}
+
+func clean(json: Bool) throws {
+    let includes = Set(try options("--include"))
+    let rules = try loadRules()
+    if let unknown = includes.first(where: { id in !rules.contains { $0.id == id } }) {
+        throw UsageError(message: "there's no rule called \(unknown); see vulture rules")
+    }
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    let policy = SafetyPolicy(home: home)
+    let store = RecentlyRemoved.standard(home: home)
+    try store.empty()  // clean-ups past their 30 days go first
+
+    let plan = CleanupPlanner(rules: rules, policy: policy, runningApps: runningBundleIDs())
+        .plan(scanner: DiskScanner(skipping: Privacy.foldersToSkip()))
+    var selected = plan.defaultSelection
+    for group in plan.groups where includes.contains(group.rule.id) {
+        selected.formUnion(group.findings.filter { $0.status == .youDecide }.map(\.path))
+    }
+    let chosen = plan.groups.flatMap { g in g.findings.filter { selected.contains($0.path) }.map { (g.rule, $0) } }
+    guard !chosen.isEmpty else {
+        if json { return try printJSON(CleanupResult()) }
+        return print("Nothing to clean up right now.")
+    }
+
+    if !json {
+        let now = chosen.filter { $0.0.regrows != .never }.reduce(0) { $0 + $1.1.usage.bytes }
+        let kept = chosen.filter { $0.0.regrows == .never }.reduce(0) { $0 + $1.1.usage.bytes }
+        print("About to clean up:")
+        for group in plan.groups {
+            let items = group.findings.filter { selected.contains($0.path) }
+            guard !items.isEmpty else { continue }
+            let where_ = group.rule.regrows == .never ? "to Recently Removed" : "removed, apps make these again"
+            print("  \(padded(group.rule.title, 44)) \(padded(size(items.reduce(0) { $0 + $1.usage.bytes }), 10)) \(where_)")
+        }
+        print()
+        if now > 0 { print("\(size(now)) is freed right away.") }
+        if kept > 0 { print("\(size(kept)) goes to Recently Removed, where you can put it back for 30 days.") }
+        guard confirm("Clean up?") else { return print("Nothing was changed.") }
+    }
+
+    let executor = CleanupExecutor(policy: policy, store: store, runningApps: { runningBundleIDs() })
+    let result = executor.run(plan, selected: selected)
+    if json { return try printJSON(result) }
+
+    print("\nDone. You freed \(size(result.freedBytes)).")
+    if let id = result.batchID {
+        print("\(size(result.keptBytes)) is in Recently Removed. To put it back: vulture restore \(id)")
+    }
+    if !result.failures.isEmpty {
+        print("\nLeft alone:")
+        for f in result.failures { print("  – \(tilde(f.path)): \(f.reason)") }
+    }
+}
+
+func removed(json: Bool) throws {
+    let store = RecentlyRemoved.standard()
+    let batches = store.batches()
+    if json { return try printJSON(batches) }
+    guard !batches.isEmpty else { return print("Recently Removed is empty.") }
+    let date = DateFormatter()
+    date.dateStyle = .medium
+    date.timeStyle = .short
+    for b in batches {
+        let left = max(0, Int(ceil(b.expires(after: store.keepDays).timeIntervalSinceNow / 86_400)))
+        print("\(b.id)  \(b.title), \(date.string(from: b.removedAt))  \(size(b.bytes))  \(left) days left")
+        for item in b.items.prefix(5) { print("    \(tilde(item.originalPath))") }
+        if b.items.count > 5 { print("    … and \(b.items.count - 5) more") }
+    }
+}
+
+func restore() throws {
+    guard let id = arguments.first(where: { !$0.hasPrefix("-") }) else { throw UsageError(message: "restore needs the id shown by vulture removed") }
+    let store = RecentlyRemoved.standard()
+    let batch = try store.batch(id)
+    guard confirm("Put back \(batch.items.count) items (\(size(batch.bytes)))?") else { return print("Nothing was changed.") }
+    let failures = try store.putBack(batchID: id)
+    print("Put back \(batch.items.count - failures.count) of \(batch.items.count) items.")
+    for (item, error) in failures { print("  – \(tilde(item.originalPath)): \(error)") }
+}
+
+func emptyCommand() throws {
+    let store = RecentlyRemoved.standard()
+    if flag("--all") {
+        let total = store.batches().reduce(0) { $0 + $1.bytes }
+        guard total > 0 else { return print("Recently Removed is already empty.") }
+        guard confirm("Remove \(size(total)) for good? This can't be undone.") else { return print("Nothing was changed.") }
+        print("Freed \(size(try store.emptyAll())).")
+    } else {
+        print("Removed expired clean-ups for good, freeing \(size(try store.empty())).")
+    }
+}
+
 // MARK: - Entry point
 
 do {
@@ -189,6 +297,10 @@ do {
     case "size": try sizeCommand(json: json)
     case "rules": try rulesCommand(json: json)
     case "check-rules": try checkRules()
+    case "clean": try clean(json: json)
+    case "removed": try removed(json: json)
+    case "restore": try restore()
+    case "empty": try emptyCommand()
     case "help": print(usage)
     default: throw UsageError(message: "unknown command `\(command)`")
     }

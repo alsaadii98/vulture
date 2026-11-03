@@ -11,6 +11,7 @@ let package = Package(
     products: [
         .library(name: "VultureCore", targets: ["VultureCore"]),
         .executable(name: "vulture", targets: ["vulture"]),
+        .executable(name: "VultureApp", targets: ["VultureApp"]),
     ],
     targets: [
         .target(
@@ -19,6 +20,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "vulture",
+            dependencies: ["VultureCore"]
+        ),
+        .executableTarget(
+            name: "VultureApp",
             dependencies: ["VultureCore"]
         ),
         .testTarget(

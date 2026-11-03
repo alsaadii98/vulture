@@ -22,6 +22,8 @@ public struct Finding: Codable, Hashable, Sendable {
     public var skipReason: SkipReason?
     /// For `.appRunning`, the app that has to be closed first.
     public var blockingApp: String?
+    /// The item's identity when it was measured, so a clean-up can tell if something else took its place since.
+    public var fileID: UInt64?
 }
 
 /// Everything a scan found, grouped by rule. Nothing is removed while planning.
@@ -41,6 +43,11 @@ public struct CleanupPlan: Codable, Sendable {
     }
 
     public var unreadable: Int { groups.flatMap(\.findings).reduce(0) { $0 + $1.usage.unreadable } }
+
+    /// What's selected before the person changes anything: only the recommended items.
+    public var defaultSelection: Set<String> {
+        Set(groups.flatMap(\.findings).filter { $0.status == .recommended }.map(\.path))
+    }
 }
 
 public struct CleanupPlanner: Sendable {
@@ -98,6 +105,8 @@ public struct CleanupPlanner: Sendable {
             // Protected places aren't measured or listed; people only need to hear about things they could act on.
             return reason == .protected ? nil : Finding(ruleID: rule.id, path: path, usage: DiskUsage(), status: .skipped, skipReason: reason)
         }
+        var st = stat()
+        let fileID = lstat(url.path, &st) == 0 ? UInt64(st.st_ino) : nil
         let usage = scanner.usage(of: url)
         guard usage.bytes > 0 else { return nil }
         if rule.minAgeDays > 0, let newest = usage.newest, now.timeIntervalSince(newest) < Double(rule.minAgeDays) * 86_400 {
@@ -106,9 +115,9 @@ public struct CleanupPlanner: Sendable {
         let blocker = rule.closeFirst.first { runningApps.contains($0) }
             ?? (rule.entryNameIsBundleID && runningApps.contains(url.lastPathComponent) ? url.lastPathComponent : nil)
         if let blocker {
-            return Finding(ruleID: rule.id, path: path, usage: usage, status: .skipped, skipReason: .appRunning, blockingApp: blocker)
+            return Finding(ruleID: rule.id, path: path, usage: usage, status: .skipped, skipReason: .appRunning, blockingApp: blocker, fileID: fileID)
         }
-        return Finding(ruleID: rule.id, path: path, usage: usage, status: rule.safety == .safe ? .recommended : .youDecide)
+        return Finding(ruleID: rule.id, path: path, usage: usage, status: rule.safety == .safe ? .recommended : .youDecide, fileID: fileID)
     }
 
     private func overlaps(_ a: String, _ b: String) -> Bool {

@@ -40,6 +40,8 @@ public struct SafetyPolicy: Sendable {
         "Library/Application Support/MobileSync",
         "Library/Photos",
         "Library/Preferences",
+        // Vulture's own Recently Removed
+        "Library/Application Support/Vulture",
     ]
 
     public init(home: URL, protectedPaths: [String] = SafetyPolicy.standardProtectedPaths) {
