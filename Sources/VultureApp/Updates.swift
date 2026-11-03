@@ -106,9 +106,11 @@ struct UpdateSheet: View {
                 }
                 Spacer()
                 Button("Later") { dismiss() }
+                    .glassButton()
                     .keyboardShortcut(.cancelAction)
                     .disabled(updates.state == .installing)
                 Button("Install and Relaunch") { Task { await updates.installAndRelaunch() } }
+                    .primaryButton(.regular)
                     .keyboardShortcut(.defaultAction)
                     .disabled(updates.state == .installing)
             }

@@ -211,7 +211,7 @@ struct RemovalDetails: View {
             HStack {
                 Text("“Check first” items are named like the app, but might belong to something else.").font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+                Button("Done") { dismiss() }.primaryButton(.regular).keyboardShortcut(.defaultAction)
             }
             .padding()
         }
@@ -252,11 +252,13 @@ struct LeftoversSheet: View {
             }
             HStack {
                 Button("Cancel") { dismiss() }
+                    .glassButton()
                 Spacer()
                 Button("Move \(formatBytes(selectedBytes)) to Recently Removed") {
                     dismiss()
                     Task { await model.cleanLeftovers() }
                 }
+                .primaryButton(.regular)
                 .keyboardShortcut(.defaultAction)
                 .disabled(model.leftoverSelection.isEmpty)
             }

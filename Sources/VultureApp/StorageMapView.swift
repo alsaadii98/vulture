@@ -554,11 +554,11 @@ private struct ItemDetail: View {
             }
             VStack(alignment: .leading, spacing: 8) {
                 if isDocker && model.dev?.docker != nil || item.name == "Docker.raw" {
-                    Button("Tidy Up Docker") { confirmingDocker = true }.primaryButton().controlSize(.regular)
+                    Button("Tidy Up Docker") { confirmingDocker = true }.primaryButton(.regular)
                         .disabled(model.devBusy != nil)
                 }
                 if rule != nil && warning == nil {
-                    Button("Review in Clean Up") { model.section = .clean }.primaryButton().controlSize(.regular)
+                    Button("Review in Clean Up") { model.section = .clean }.primaryButton(.regular)
                 }
                 HStack {
                     Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: item.path)]) }

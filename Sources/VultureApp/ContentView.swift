@@ -28,7 +28,7 @@ struct ContentView: View {
     private var main: some View {
         NavigationSplitView {
             Sidebar()
-                .navigationSplitViewColumnWidth(min: 210, ideal: 232, max: 280)
+                .navigationSplitViewColumnWidth(min: 230, ideal: 245, max: 290)
         } detail: {
             Group {
                 switch model.section ?? .home {

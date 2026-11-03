@@ -68,29 +68,50 @@ extension View {
         }
     }
 
-    /// The main call to action: a filled glass capsule.
-    @ViewBuilder
-    func primaryButton() -> some View {
-        if #available(macOS 26.0, *) {
-            self.buttonStyle(.glassProminent).controlSize(.large)
-        } else {
-            self.buttonStyle(.borderedProminent).buttonBorderShape(.capsule).controlSize(.large)
-        }
+    /// The main call to action: a filled blue glass capsule. While it can't be used it turns into
+    /// plain glass, so it never shows as a dim blue blob.
+    func primaryButton(_ size: ControlSize = .large) -> some View {
+        modifier(PrimaryButtonStyle(size: size))
     }
 
     /// A secondary action: a clear glass capsule.
-    @ViewBuilder
-    func glassButton() -> some View {
-        if #available(macOS 26.0, *) {
-            self.buttonStyle(.glass)
-        } else {
-            self.buttonStyle(.bordered).buttonBorderShape(.capsule)
-        }
+    func glassButton(_ size: ControlSize = .regular) -> some View {
+        modifier(GlassButtonStyle(size: size))
     }
 
     /// White in light mode, black in dark mode, under everything including the toolbar.
     func screenBackground() -> some View {
         background(Theme.window.ignoresSafeArea())
+    }
+}
+
+private struct PrimaryButtonStyle: ViewModifier {
+    @Environment(\.isEnabled) private var isEnabled
+    let size: ControlSize
+
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            if isEnabled {
+                content.buttonStyle(.glassProminent).tint(Theme.accent).controlSize(size)
+            } else {
+                content.buttonStyle(.glass).controlSize(size)
+            }
+        } else {
+            content.buttonStyle(.borderedProminent).buttonBorderShape(.capsule).tint(Theme.accent).controlSize(size)
+        }
+    }
+}
+
+private struct GlassButtonStyle: ViewModifier {
+    let size: ControlSize
+
+    func body(content: Content) -> some View {
+        // No tint: the window's blue would turn clear glass into a filled blue button.
+        if #available(macOS 26.0, *) {
+            content.buttonStyle(.glass).tint(nil).controlSize(size)
+        } else {
+            content.buttonStyle(.bordered).buttonBorderShape(.capsule).tint(nil).controlSize(size)
+        }
     }
 }
 

@@ -228,7 +228,7 @@ private struct AccessStep: View {
                 .accessibilityElement(children: .combine)
             }
             Spacer()
-            Button(hasAccess ? "Continue" : "Skip for Now", action: next).glassButton().controlSize(.large)
+            Button(hasAccess ? "Continue" : "Skip for Now", action: next).glassButton(.large)
             if !hasAccess {
                 Button("Open System Settings") { openPrivacySettings() }
                     .primaryButton()
@@ -275,7 +275,7 @@ private struct MenuBarStep: View {
             Spacer()
             HStack(spacing: 10) {
                 Spacer()
-                Button("Back", action: back).glassButton().controlSize(.large)
+                Button("Back", action: back).glassButton(.large)
                 Button("Start First Scan", action: finish)
                     .primaryButton()
                     .keyboardShortcut(.defaultAction)

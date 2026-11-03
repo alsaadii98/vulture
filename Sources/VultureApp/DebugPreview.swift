@@ -14,7 +14,7 @@ enum DebugPreview {
         UserDefaults.standard.string(forKey: "VultureSection").flatMap(SidebarSection.init(rawValue:))
     }
 
-    static func applyAppearance() {
+    @MainActor static func applyAppearance() {
         switch UserDefaults.standard.string(forKey: "VultureAppearance") {
         case "light": NSApp.appearance = NSAppearance(named: .aqua)
         case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)

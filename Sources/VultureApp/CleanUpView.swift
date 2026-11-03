@@ -59,7 +59,7 @@ struct CleanUpView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button(model.selectedBytes > 0 ? "Clean Up \(formatBytes(model.selectedBytes))" : "Clean Up") { model.confirmingClean = true }
-                    .cleanUpProminent()
+                    .primaryButton(.regular)
                     .disabled(model.selection.isEmpty || isCleaning)
             }
         }
@@ -278,17 +278,6 @@ func tildePath(_ path: String) -> String {
     return path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
 }
 
-extension View {
-    /// The filled toolbar button for the screen's main action.
-    @ViewBuilder
-    func cleanUpProminent() -> some View {
-        if #available(macOS 26.0, *) {
-            self.buttonStyle(.glassProminent)
-        } else {
-            self.buttonStyle(.borderedProminent)
-        }
-    }
-}
 
 /// The owning app's real icon when the rule names one, otherwise a symbol for its kind.
 struct RuleIcon: View {

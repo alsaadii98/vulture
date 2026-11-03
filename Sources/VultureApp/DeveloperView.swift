@@ -31,7 +31,7 @@ struct DeveloperView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button(selectedBytes > 0 ? "Clean Up \(formatBytes(selectedBytes))" : "Clean Up") { confirming = true }
-                    .primaryButton()
+                    .primaryButton(.regular)
                     .disabled(selectedBytes == 0 && !includeDocker || model.devBusy != nil)
             }
         }
