@@ -71,13 +71,18 @@ public struct CleanupPlanner: Sendable {
     public let now: Date
     /// Paths that filled up again quickly after an earlier clean-up (from `RegrowthTracker`).
     public let quicklyRefilling: Set<String>
+    /// Things that can't come back (rules with `regrows: never`) changed within this many days aren't selected
+    /// by default, so a file someone is still using needs a deliberate choice. 0 turns this off.
+    public let recentlyUsedDays: Int
 
-    public init(rules: [Rule], policy: SafetyPolicy, runningApps: Set<String>, now: Date = Date(), quicklyRefilling: Set<String> = []) {
+    public init(rules: [Rule], policy: SafetyPolicy, runningApps: Set<String>, now: Date = Date(), quicklyRefilling: Set<String> = [],
+                recentlyUsedDays: Int = 0) {
         self.rules = rules
         self.policy = policy
         self.runningApps = runningApps
         self.now = now
         self.quicklyRefilling = quicklyRefilling
+        self.recentlyUsedDays = recentlyUsedDays
     }
 
     public func plan(scanner: DiskScanner = DiskScanner()) -> CleanupPlan {
@@ -132,6 +137,10 @@ public struct CleanupPlanner: Sendable {
             ?? (rule.entryNameIsBundleID && runningApps.contains(url.lastPathComponent) ? url.lastPathComponent : nil)
         if let blocker {
             return Finding(ruleID: rule.id, path: path, usage: usage, status: .skipped, skipReason: .appRunning, blockingApp: blocker, fileID: fileID)
+        }
+        if recentlyUsedDays > 0, rule.regrows == .never, let newest = usage.newest,
+           now.timeIntervalSince(newest) < Double(recentlyUsedDays) * 86_400 {
+            return Finding(ruleID: rule.id, path: path, usage: usage, status: .youDecide, fileID: fileID)
         }
         if quicklyRefilling.contains(path) {
             return Finding(ruleID: rule.id, path: path, usage: usage, status: .youDecide, fileID: fileID, fillsQuickly: true)

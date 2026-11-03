@@ -57,8 +57,10 @@ public final class RecentlyRemoved: @unchecked Sendable {
     }
 
     /// `~/Library/Application Support/Vulture/Recently Removed`
-    public static func standard(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> RecentlyRemoved {
-        RecentlyRemoved(root: home.appendingPathComponent("Library/Application Support/Vulture/Recently Removed"))
+    public static func standard(home: URL = FileManager.default.homeDirectoryForCurrentUser,
+                                keepDays: Int = RecentlyRemoved.defaultKeepDays) -> RecentlyRemoved {
+        RecentlyRemoved(root: home.appendingPathComponent("Library/Application Support/Vulture/Recently Removed"),
+                        keepDays: max(1, keepDays))
     }
 
     // MARK: - Reading
@@ -151,6 +153,17 @@ public final class RecentlyRemoved: @unchecked Sendable {
         for b in targets {
             try Remover.removeForGood(root.appendingPathComponent(b.id))
             freed += b.bytes
+        }
+        return freed
+    }
+
+    /// Empties the oldest clean-ups first, one at a time, while `needsSpace()` says the disk is still too full.
+    /// Returns the space freed.
+    @discardableResult
+    public func emptyOldest(while needsSpace: () -> Bool) throws -> Int64 {
+        var freed: Int64 = 0
+        for batch in batches().reversed() where needsSpace() {
+            freed += try empty(batchIDs: [batch.id])
         }
         return freed
     }

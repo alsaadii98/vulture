@@ -77,7 +77,8 @@ final class AppModel {
     var lastChecked: Date?
 
     let home = FileManager.default.homeDirectoryForCurrentUser
-    let store = RecentlyRemoved.standard()
+    /// Recently Removed, kept for as many days as Settings › Safety says.
+    var store: RecentlyRemoved { RecentlyRemoved.standard(home: home, keepDays: Preferences.keepDaysValue) }
     private(set) var rules: [Rule] = []
 
     init() {
@@ -89,6 +90,7 @@ final class AppModel {
         }
         refreshDisk()
         refreshRemoved()
+        startBackgroundChores()
     }
 
     // MARK: - Derived values
@@ -118,29 +120,39 @@ final class AppModel {
     func scan() async {
         if case .scanning = phase { return }
         phase = .scanning
-        let rules = rules, home = home, running = Self.runningApps()
+        emptyEarlyIfNeeded()
+        let disabled = Preferences.disabledRuleIDs
+        let rules = rules.filter { !disabled.contains($0.id) }, home = home, running = Self.runningApps()
+        let policy = Preferences.safetyPolicy(home: home), recentDays = Preferences.recentDaysValue
         let plan = await Task.detached(priority: .userInitiated) {
             let regrowth = RegrowthTracker.standard(home: home)
-            let plan = CleanupPlanner(rules: rules, policy: SafetyPolicy(home: home), runningApps: running,
-                                      quicklyRefilling: regrowth.quicklyRefilling())
+            let plan = CleanupPlanner(rules: rules, policy: policy, runningApps: running,
+                                      quicklyRefilling: regrowth.quicklyRefilling(), recentlyUsedDays: recentDays)
                 .plan(scanner: DiskScanner(skipping: Privacy.foldersToSkip(home: home)))
             try? regrowth.observe(plan)
             return plan
         }.value
         self.plan = plan
         selection = plan.defaultSelection
+        if !Preferences.chooseCheckFirstValue {
+            // The person asked for "Check first" items to start selected too, except ones seen refilling quickly.
+            selection.formUnion(plan.groups.flatMap(\.findings).filter { $0.status == .youDecide && $0.fillsQuickly != true }.map(\.path))
+        }
         lastChecked = Date()
+        UserDefaults.standard.set(Date(), forKey: Preferences.lastAutoCheck)
         phase = .ready
         refreshDisk()
+        Reminders.afterScan(cleanable: plan.bytes(.recommended), free: freeBytes)
     }
 
     func clean() async {
         guard let plan, !selection.isEmpty else { return }
         phase = .cleaning
         let selected = selection, home = home, store = store
-        _ = try? store.empty() // clean-ups past their 30 days
+        _ = try? store.empty() // clean-ups past the days chosen in Settings
+        let policy = Preferences.safetyPolicy(home: home)
         async let result = Task.detached(priority: .userInitiated) {
-            let result = CleanupExecutor(policy: SafetyPolicy(home: home), store: store, runningApps: { AppModel.runningApps() })
+            let result = CleanupExecutor(policy: policy, store: store, runningApps: { AppModel.runningApps() })
                 .run(plan, selected: selected)
             try? RegrowthTracker.standard(home: home).noteCleaned(result.removedForGood)
             return result
@@ -459,6 +471,49 @@ final class AppModel {
 
     nonisolated static func runningApps() -> Set<String> {
         Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
+    }
+
+    // MARK: - Fork D
+
+    /// Every rule Vulture knows, including ones turned off in Settings › What to Clean.
+    var allRules: [Rule] { rules }
+
+    @ObservationIgnored private var scheduleTimer: Timer?
+
+    /// Settings that act on their own: automatic checks, empty early, low-space reminders.
+    /// They run only while Vulture (or its menu bar item) is open.
+    func startBackgroundChores() {
+        Preferences.register()
+        emptyEarlyIfNeeded()
+        Reminders.checkFreeSpace(freeBytes)
+        scheduleTimer?.invalidate()
+        scheduleTimer = Timer.scheduledTimer(withTimeInterval: 15 * 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.checkIfScheduled() }
+        }
+    }
+
+    /// Settings › Schedule: checks the Mac when the chosen interval has passed since the last check.
+    func checkIfScheduled() async {
+        guard let interval = Preferences.autoCheckValue.interval else { return }
+        let last = UserDefaults.standard.object(forKey: Preferences.lastAutoCheck) as? Date ?? .distantPast
+        guard Date().timeIntervalSince(last) >= interval else { return }
+        switch phase {
+        case .scanning, .cleaning: return
+        default: await scan()
+        }
+    }
+
+    /// Settings › Safety › Empty early: when the disk is almost full, the oldest clean-ups go first.
+    func emptyEarlyIfNeeded() {
+        guard Preferences.emptyEarlyValue, !batches.isEmpty else { return }
+        refreshDisk()
+        guard freeBytes > 0, freeBytes < Preferences.almostFull else { return }
+        _ = try? store.emptyOldest { [self] in
+            refreshDisk()
+            return freeBytes < Preferences.almostFull
+        }
+        refreshRemoved()
+        refreshDisk()
     }
 }
 

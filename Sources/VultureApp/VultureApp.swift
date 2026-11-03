@@ -74,7 +74,7 @@ struct VultureApp: App {
         }
 
         Settings {
-            SettingsView().environment(updates)
+            SettingsView().environment(updates).environment(model)
         }
 
         MenuBarExtra(isInserted: $showMenuBarMonitor) {
