@@ -223,6 +223,143 @@ final class AppModel {
         refreshDisk()
     }
 
+    // MARK: Apps
+
+    enum AppFilter: String, CaseIterable { case all = "All Apps", unused = "Not Used Lately", largest = "Largest" }
+
+    var apps: [InstalledApp]?
+    var loadingApps = false
+    var appFilter: AppFilter = .all
+    var appSearch = ""
+    var appSelection: Set<String> = []
+    /// Files of each selected app, found when it's selected.
+    var appFiles: [String: [AppFile]] = [:]
+    /// Which of those files go with the app. Files named exactly after the app start selected.
+    var appFileSelection: Set<String> = []
+    var leftovers: [LeftoverGroup] = []
+    var leftoverSelection: Set<String> = []
+    var appsBusy: String?
+    var lastAppsResult: String?
+
+    var visibleApps: [InstalledApp] {
+        var list = (apps ?? []).filter { !$0.isApple }
+        if !appSearch.isEmpty { list = list.filter { $0.name.localizedCaseInsensitiveContains(appSearch) } }
+        switch appFilter {
+        case .all: break
+        case .unused: list = list.filter { Self.isUnused($0) }.sorted { ($0.lastUsed ?? .distantPast) < ($1.lastUsed ?? .distantPast) }
+        case .largest: list.sort { $0.bytes > $1.bytes }
+        }
+        return list
+    }
+
+    static func isUnused(_ app: InstalledApp) -> Bool {
+        guard let used = app.lastUsed else { return true }
+        return Date().timeIntervalSince(used) > 60 * 86_400
+    }
+
+    var selectedApps: [InstalledApp] { (apps ?? []).filter { appSelection.contains($0.path) } }
+
+    var appRemovalBytes: Int64 {
+        selectedApps.reduce(0) { total, app in
+            total + app.bytes + (appFiles[app.path] ?? []).filter { appFileSelection.contains($0.path) }.reduce(0) { $0 + $1.usage.bytes }
+        }
+    }
+
+    func loadApps() async {
+        guard !loadingApps else { return }
+        loadingApps = true
+        let home = home
+        let (list, found) = await Task.detached(priority: .userInitiated) {
+            let list = AppInventory.installedApps(roots: AppInventory.standardRoots(home: home), home: home, scanner: DiskScanner())
+            let found = LeftoverFinder.find(home: home, installed: Set(list.map(\.bundleID)), isRegistered: {
+                !NSWorkspace.shared.urlsForApplications(withBundleIdentifier: $0).isEmpty
+            }, scanner: DiskScanner())
+            return (list, found)
+        }.value
+        apps = list
+        leftovers = found
+        appSelection.formIntersection(list.map(\.path))
+        loadingApps = false
+    }
+
+    func toggleApp(_ app: InstalledApp) {
+        if appSelection.remove(app.path) != nil { return }
+        appSelection.insert(app.path)
+        guard appFiles[app.path] == nil else { return }
+        let home = home, fda = hasFullDiskAccess
+        Task {
+            let files = await Task.detached {
+                AppInventory.files(of: app.bundleID, name: app.name, home: home, scanner: DiskScanner(), fullDiskAccess: fda)
+            }.value
+            appFiles[app.path] = files
+            appFileSelection.formUnion(files.filter(\.certain).map(\.path))
+        }
+    }
+
+    func removeSelectedApps() async {
+        let chosen = selectedApps
+        guard !chosen.isEmpty else { return }
+        appsBusy = "Removing \(chosen.count == 1 ? chosen[0].name : "\(chosen.count) apps")…"
+        let home = home, store = store, files = appFiles, picked = appFileSelection
+        let messages = await Task.detached(priority: .userInitiated) { () -> [String] in
+            let running = AppModel.runningApps(), open = OpenFiles.snapshot()
+            return chosen.map { app in
+                do {
+                    let mine = (files[app.path] ?? []).filter { picked.contains($0.path) }
+                    let (_, failures) = try AppRemover.remove(app, files: mine, roots: AppInventory.standardRoots(home: home), home: home,
+                                                              store: store, running: running, open: open)
+                    return failures.isEmpty ? "" : "\(app.name): \(failures.count) files were left because something changed."
+                } catch {
+                    return "\(app.name): \(error)"
+                }
+            }
+        }.value
+        let problems = messages.filter { !$0.isEmpty }
+        if !problems.isEmpty { problem = problems.joined(separator: "\n") }
+        lastAppsResult = "Moved to Recently Removed. You can put \(chosen.count == 1 ? "it" : "them") back for 30 days."
+        appSelection = []
+        appsBusy = nil
+        refreshRemoved()
+        await loadApps()
+    }
+
+    func cleanLeftovers() async {
+        let files = leftovers.flatMap(\.files).filter { leftoverSelection.contains($0.path) }
+        guard !files.isEmpty else { return }
+        appsBusy = "Moving leftovers…"
+        let home = home, store = store
+        let result = await Task.detached { LeftoverFinder.remove(files, home: home, store: store, open: OpenFiles.snapshot()) }.value
+        lastAppsResult = "Moved \(formatBytes(result.keptBytes)) of leftovers to Recently Removed."
+        leftoverSelection = []
+        appsBusy = nil
+        refreshRemoved()
+        await loadApps()
+    }
+
+    // MARK: Startup
+
+    var launchItems: [LaunchItem]?
+
+    func loadStartup() async {
+        let home = home
+        launchItems = await Task.detached { LaunchItems.list(home: home) }.value
+    }
+
+    func setStartup(_ item: LaunchItem, on: Bool) async {
+        let ok = await Task.detached { LaunchItems.setEnabled(item, on) }.value
+        if !ok { problem = "macOS didn't accept the change for \(item.label)." }
+        await loadStartup()
+    }
+
+    func removeLeftBehindItems() async {
+        let items = (launchItems ?? []).filter { $0.scope == .user && $0.isLeftBehind }
+        let home = home, store = store
+        let result = await Task.detached { LaunchItems.removeLeftBehind(items, home: home, store: store) }.value
+        if let f = result.failures.first { problem = "\(f.path): \(f.reason)" }
+        refreshRemoved()
+        await loadStartup()
+    }
+
     func putBack(_ batchID: String) {
         do {
             let failures = try store.putBack(batchID: batchID)

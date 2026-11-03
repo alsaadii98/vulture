@@ -20,6 +20,12 @@ let usage = """
       vulture dev [--json]                    Xcode simulators, Docker and old projects at a glance
       vulture dev remove-simulators [--yes]   Remove simulators whose iOS version is gone
       vulture dev tidy-docker [--yes]         Remove unused Docker images, stopped containers and build cache
+      vulture apps [--unused DAYS] [--json]   List apps, largest first (or only those unused for DAYS)
+      vulture uninstall NAME [--yes]          Remove an app and everything it keeps, to Recently Removed
+      vulture leftovers [--clean] [--yes] [--json]
+                                              Files left behind by apps that are already gone
+      vulture startup [--json]                What starts by itself, and what's left behind
+      vulture startup off|on LABEL            Stop one of your items from starting by itself, or let it again
       vulture removed [--json]                List what's in Recently Removed
       vulture restore ID [--yes]              Put back everything from one clean-up
       vulture empty [--all] [--yes]           Remove expired clean-ups for good (--all: everything)
@@ -338,6 +344,117 @@ func dev(json: Bool) throws {
     print(total > 0 ? "  \(size(total)) in build folders. Details: vulture projects" : "  Nothing found.")
 }
 
+func isRegistered(_ bundleID: String) -> Bool {
+    !NSWorkspace.shared.urlsForApplications(withBundleIdentifier: bundleID).isEmpty
+}
+
+func ago(_ date: Date?) -> String {
+    guard let date else { return "no sign of use" }
+    let days = Int(Date().timeIntervalSince(date) / 86_400)
+    switch days {
+    case 0: return "used today"
+    case 1..<14: return "used \(days) days ago"
+    case 14..<60: return "used \(days / 7) weeks ago"
+    default: return "not used in \(days / 30) months"
+    }
+}
+
+func apps(json: Bool) throws {
+    let unused = try option("--unused").map { v -> Int in
+        guard let n = Int(v), n >= 0 else { throw UsageError(message: "--unused needs a number of days") }
+        return n
+    }
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    var list = AppInventory.installedApps(roots: AppInventory.standardRoots(home: home), home: home, scanner: DiskScanner()).filter { !$0.isApple }
+    if let unused {
+        list = list.filter { app in app.lastUsed.map { Date().timeIntervalSince($0) > Double(unused) * 86_400 } ?? true }
+    }
+    list.sort { $0.bytes > $1.bytes }
+    if json { return try printJSON(list) }
+    print("\(list.count) apps, \(size(list.reduce(0) { $0 + $1.bytes })) in all\n")
+    for app in list {
+        let note = app.canRemove ? "" : "  (needs an administrator to remove)"
+        print("  \(padded(app.name, 34)) \(padded(size(app.bytes), 10)) \(ago(app.lastUsed))\(note)")
+    }
+}
+
+func uninstall() throws {
+    guard let query = arguments.first(where: { !$0.hasPrefix("-") }) else { throw UsageError(message: "uninstall needs an app name") }
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    let roots = AppInventory.standardRoots(home: home)
+    let matches = AppInventory.installedApps(roots: roots, scanner: DiskScanner())
+        .filter { $0.name.localizedCaseInsensitiveCompare(query) == .orderedSame || $0.bundleID == query }
+    guard matches.count == 1, let app = matches.first else {
+        throw UsageError(message: matches.isEmpty ? "no app called \(query); see vulture apps" : "more than one app is called \(query); use its bundle identifier")
+    }
+    let files = AppInventory.files(of: app.bundleID, name: app.name, home: home, scanner: DiskScanner(), fullDiskAccess: Privacy.hasFullDiskAccess(home: home))
+    let certain = files.filter(\.certain), unsure = files.filter { !$0.certain }
+    print("\(app.name) \(app.version ?? "")  \(size(app.bytes))  \(tilde(app.path))")
+    for f in certain { print("  + \(padded(tilde(f.path), 70)) \(size(f.usage.bytes))") }
+    for f in unsure { print("  ? \(padded(tilde(f.path), 70)) \(size(f.usage.bytes))  (named like the app; kept unless you add --all)") }
+    let chosen = flag("--all") ? files : certain
+    let total = app.bytes + chosen.reduce(0) { $0 + $1.usage.bytes }
+    guard confirm("\nMove \(app.name) and \(chosen.count) of its files (\(size(total))) to Recently Removed?") else { return print("Nothing was changed.") }
+    let (batch, failures) = try AppRemover.remove(app, files: chosen, roots: roots, home: home, store: RecentlyRemoved.standard(home: home),
+                                                  running: runningBundleIDs(), open: OpenFiles.snapshot())
+    print("Removed \(app.name). To put it back: vulture restore \(batch.id)")
+    for f in failures { print("  – left \(tilde(f.path)): \(f.reason)") }
+    print("The space is freed when Recently Removed is emptied (after 30 days, or with vulture empty --all).")
+}
+
+func leftovers(json: Bool) throws {
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    let installed = Set(AppInventory.installedApps(roots: AppInventory.standardRoots(home: home), scanner: DiskScanner()).map(\.bundleID))
+    let groups = LeftoverFinder.find(home: home, installed: installed, isRegistered: isRegistered, scanner: DiskScanner())
+    if json { return try printJSON(groups) }
+    guard !groups.isEmpty else { return print("No leftovers from removed apps.") }
+    let total = groups.reduce(0) { $0 + $1.bytes }
+    print("\(groups.count) apps that are no longer on this Mac left \(size(total)) behind.\n")
+    for g in groups {
+        let last = g.lastChanged.map { "last changed \($0.formatted(date: .abbreviated, time: .omitted))" } ?? ""
+        print("  \(padded(g.displayName, 22)) \(padded(g.bundleID, 40)) \(padded(size(g.bytes), 10)) \(last)")
+    }
+    guard flag("--clean") else { return print("\nLook through these, then: vulture leftovers --clean") }
+    guard confirm("\nMove all of these to Recently Removed?") else { return print("Nothing was changed.") }
+    let result = LeftoverFinder.remove(groups.flatMap(\.files), home: home, store: RecentlyRemoved.standard(home: home), open: OpenFiles.snapshot())
+    if let id = result.batchID { print("Moved \(size(result.keptBytes)) to Recently Removed. To put it back: vulture restore \(id)") }
+    for f in result.failures { print("  – left \(tilde(f.path)): \(f.reason)") }
+}
+
+func startup(json: Bool) throws {
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    if let verb = arguments.first, verb == "on" || verb == "off" {
+        guard arguments.count >= 2 else { throw UsageError(message: "startup \(verb) needs the item's label; see vulture startup") }
+        let label = arguments[1]
+        guard let item = LaunchItems.list(home: home, includeAllUsers: false).first(where: { $0.label == label }) else {
+            throw UsageError(message: "\(label) isn't one of your items")
+        }
+        guard LaunchItems.setEnabled(item, verb == "on") else { throw UsageError(message: "macOS didn't accept the change") }
+        return print(verb == "on" ? "\(label) can start by itself again." : "\(label) won't start by itself anymore. Nothing was deleted; turn it back on with vulture startup on \(label)")
+    }
+    let items = LaunchItems.list(home: home)
+    if json { return try printJSON(items) }
+    func describe(_ i: LaunchItem) -> String {
+        if i.isLeftBehind { return "left behind: its app is gone" }
+        if i.disabled { return "turned off" }
+        var parts: [String] = []
+        if i.keepsRunning { parts.append("always running") } else if i.runsAtLogin { parts.append("starts when you log in") }
+        if let s = i.intervalSeconds { parts.append(s >= 3600 ? "runs every \(s / 3600) h" : "runs every \(max(1, s / 60)) min") }
+        return parts.isEmpty ? "starts when needed" : parts.joined(separator: ", ")
+    }
+    for (title, scope) in [("Yours (you can turn these off)", LaunchItem.Scope.user), ("For all users (needs an administrator)", .allUsersAgent), ("System helpers from apps (needs an administrator)", .allUsersDaemon)] {
+        let group = items.filter { $0.scope == scope }
+        guard !group.isEmpty else { continue }
+        print(title)
+        for i in group {
+            let owner = i.appPath.map { URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent } ?? ""
+            print("  \(padded(i.label, 48)) \(padded(owner, 18)) \(describe(i))")
+        }
+        print()
+    }
+    print("Apps that open at login are listed in System Settings › General › Login Items.")
+}
+
 func removed(json: Bool) throws {
     let store = RecentlyRemoved.standard()
     let batches = store.batches()
@@ -389,6 +506,10 @@ do {
     case "storage": try storage(json: json)
     case "projects": try projects(json: json)
     case "dev": try dev(json: json)
+    case "apps": try apps(json: json)
+    case "uninstall": try uninstall()
+    case "leftovers": try leftovers(json: json)
+    case "startup": try startup(json: json)
     case "rules": try rulesCommand(json: json)
     case "check-rules": try checkRules()
     case "clean": try clean(json: json)

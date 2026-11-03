@@ -9,6 +9,9 @@ import SwiftUI
 struct VultureApp: App {
     @NSApplicationDelegateAdaptor private var delegate: AppDelegate
     @State private var model = AppModel()
+    @State private var monitor = MonitorModel()
+    /// Off unless the person turns it on (Settings › Menu Bar, or first run).
+    @AppStorage("showMenuBarMonitor") private var showMenuBarMonitor = false
 
     var body: some Scene {
         Window("Vulture", id: "main") {
@@ -45,6 +48,13 @@ struct VultureApp: App {
         Settings {
             SettingsView()
         }
+
+        MenuBarExtra(isInserted: $showMenuBarMonitor) {
+            MonitorMenu().environment(monitor)
+        } label: {
+            MonitorLabel().environment(monitor)
+        }
+        .menuBarExtraStyle(.window)
     }
 }
 
@@ -55,5 +65,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate()
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    /// Keep running for the menu bar item when it's on; otherwise closing the window quits, like before.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        !UserDefaults.standard.bool(forKey: "showMenuBarMonitor")
+    }
 }

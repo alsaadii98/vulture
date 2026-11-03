@@ -4,7 +4,7 @@ See what's filling up your Mac, and free up space without the worry.
 
 Vulture is a free, open-source cleaner and disk tool for macOS. It explains every file it offers to remove in plain words, never touches your documents, photos or messages, and keeps everything it removes in Recently Removed for 30 days.
 
-> **Status:** early development (phase 2 done). The engine, the `vulture` command-line tool and the Mac app (Home, Clean Up, Storage, Recently Removed, Developer Files) work. Apps and Startup come next.
+> **Status:** early development (phase 3 done). The engine, the `vulture` command-line tool and the Mac app work: Home, Clean Up, Apps, Storage, Startup, Recently Removed, Developer Files and an optional menu bar monitor. Not yet signed or notarized.
 
 ## Try it
 
@@ -20,6 +20,10 @@ swift build -c release
 .build/release/vulture storage       # what kinds of things use your disk
 .build/release/vulture dev           # simulators, Docker and old projects
 .build/release/vulture projects      # build folders in projects untouched for 90 days
+.build/release/vulture apps          # apps, largest first, with when each was last used
+.build/release/vulture uninstall Figma   # remove an app and what it keeps (undoable)
+.build/release/vulture leftovers     # files left by apps that are already gone
+.build/release/vulture startup       # what starts by itself
 .build/release/vulture size ~        # what's using space in a folder
 .build/release/vulture scan --json   # the same, for scripts and AI agents
 ```

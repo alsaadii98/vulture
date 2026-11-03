@@ -29,9 +29,9 @@ struct ContentView: View {
                 case .clean: CleanUpView()
                 case .removed: RecentlyRemovedView()
                 case .developer: DeveloperView()
-                case .apps: ComingSoon(section: .apps, text: "See every app with its real size, and remove apps together with the settings and helpers they leave behind.")
+                case .apps: AppsView()
                 case .storage: StorageView()
-                case .startup: ComingSoon(section: .startup, text: "See which apps start by themselves and how much they slow your Mac down.")
+                case .startup: StartupView()
                 }
             }
             .transition(.opacity)
@@ -122,12 +122,17 @@ struct ComingSoon: View {
 struct SettingsView: View {
     @AppStorage("showDeveloperFiles") private var showDeveloperFiles = true
     @AppStorage("notifyWhenLow") private var notifyWhenLow = true
+    @AppStorage("showMenuBarMonitor") private var showMenuBarMonitor = false
 
     var body: some View {
         Form {
             Section("Extra Tools in the Sidebar") {
                 Toggle("Developer Files", isOn: $showDeveloperFiles)
                 Text("Xcode, Docker and code packages.").font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Menu Bar") {
+                Toggle("Show Vulture in the menu bar", isOn: $showMenuBarMonitor)
+                Text("A quick look at CPU, memory and free space, even when the window is closed.").font(.caption).foregroundStyle(.secondary)
             }
             Section("Reminders") {
                 Toggle("Tell me when there's a lot to clean", isOn: $notifyWhenLow)

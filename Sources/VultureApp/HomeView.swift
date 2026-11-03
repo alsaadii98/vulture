@@ -177,7 +177,7 @@ struct Notice<Action: View>: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: symbol).foregroundStyle(.orange)
-            Text(text).frame(maxWidth: .infinity, alignment: .leading)
+            Text(LocalizedStringKey(text)).frame(maxWidth: .infinity, alignment: .leading)
             action
         }
         .padding(12)
