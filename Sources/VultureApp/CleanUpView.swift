@@ -5,38 +5,63 @@
 import SwiftUI
 import VultureCore
 
-/// One list in two groups: Recommended (selected) and You Decide (not selected), plus what was left alone.
+/// Two groups: Recommended (selected) and You Decide (not selected), plus what was left alone and why.
 struct CleanUpView: View {
     @Environment(AppModel.self) private var model
+    @State private var showingSkipped = false
 
     var body: some View {
         @Bindable var model = model
-        List {
-            if case .done(let result) = model.phase {
-                DoneBanner(result: result).padding(.vertical, 8)
+        Screen(spacing: 20) {
+            switch model.phase {
+            case .cleaning:
+                Card(padding: 16) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 10) {
+                            ProgressView().controlSize(.small)
+                            Text("Cleaning up…").font(.system(size: 14, weight: .semibold))
+                        }
+                        ProgressView().progressViewStyle(.linear).frame(maxWidth: 420)
+                        Text("You can keep using your Mac while this runs.").font(.system(size: 12)).foregroundStyle(.secondary)
+                    }
+                }
+            case .done(let result):
+                HomeDoneBanner(result: result)
+            default:
+                EmptyView()
             }
-            groupSection("Recommended", note: "Safe to remove. Apps make these again when needed.", color: .green, status: .recommended)
-            groupSection("You Decide", note: "Not selected. Have a look first.", color: .orange, status: .youDecide)
-            skippedSection
-            Section {
-                Label("Files apps make again are removed right away, so you get the space now. Anything that can't come back goes to Recently Removed for 30 days.",
-                      systemImage: "checkmark.shield")
-                    .font(.callout).foregroundStyle(.secondary)
-            }
-        }
-        .overlay {
             if case .scanning = model.phase, model.plan == nil {
-                ProgressView("Checking your Mac…")
-            } else if model.plan != nil, model.groups.isEmpty {
-                ContentUnavailableView("Nothing to clean up", systemImage: "checkmark.circle", description: Text("Vulture didn't find anything worth removing."))
+                HStack(spacing: 10) {
+                    ProgressView().controlSize(.small)
+                    Text("Checking your Mac…").foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 300)
+            } else if model.plan != nil, offered.isEmpty {
+                ContentUnavailableView("Nothing to clean up", systemImage: "checkmark.circle",
+                                       description: Text("Vulture didn't find anything worth removing."))
+                    .frame(maxWidth: .infinity, minHeight: 300)
+            } else if model.plan == nil, !isDone {
+                ContentUnavailableView {
+                    Label("Not checked yet", systemImage: "magnifyingglass")
+                } description: {
+                    Text("Check your Mac to see what can be cleaned up.")
+                } actions: {
+                    Button("Check My Mac") { Task { await model.scan() } }.primaryButton()
+                }
+                .frame(maxWidth: .infinity, minHeight: 300)
             }
+            group("Recommended", note: "Safe to remove. Apps make these again when needed.", color: Theme.green, status: .recommended)
+            group("You Decide", note: "Not selected. Have a look first.", color: Theme.orange, status: .youDecide)
+            if model.plan != nil, !offered.isEmpty { footer }
         }
         .navigationTitle("Clean Up")
         .navigationSubtitle(model.selectedBytes > 0 ? "\(formatBytes(model.selectedBytes)) selected" : "")
         .toolbar {
-            Button("Clean Up \(formatBytes(model.selectedBytes))") { model.confirmingClean = true }
-                .buttonStyle(.borderedProminent)
-                .disabled(model.selection.isEmpty || isCleaning)
+            ToolbarItem(placement: .primaryAction) {
+                Button("Clean Up \(formatBytes(model.selectedBytes))") { model.confirmingClean = true }
+                    .cleanUpProminent()
+                    .disabled(model.selection.isEmpty || isCleaning)
+            }
         }
         .confirmationDialog("Clean up \(formatBytes(model.selectedBytes))?", isPresented: $model.confirmingClean) {
             Button("Clean Up") {
@@ -55,6 +80,16 @@ struct CleanUpView: View {
         return false
     }
 
+    private var isDone: Bool {
+        if case .done = model.phase { return true }
+        return false
+    }
+
+    /// Groups with something on offer.
+    private var offered: [CleanupPlan.Group] {
+        model.groups.filter { $0.findings.contains { $0.status != .skipped } }
+    }
+
     private var confirmMessage: String {
         let split = model.selectedSplit
         var parts: [String] = []
@@ -64,78 +99,194 @@ struct CleanUpView: View {
     }
 
     @ViewBuilder
-    private func groupSection(_ title: String, note: String, color: Color, status: Finding.Status) -> some View {
-        let groups = model.groups.filter { $0.findings.contains { $0.status == status } }
-        if !groups.isEmpty {
-            Section {
-                ForEach(groups, id: \.rule.id) { RuleRow(group: $0, status: status) }
-            } header: {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(title).font(.headline).foregroundStyle(color)
-                    Text(note).font(.caption).foregroundStyle(.secondary)
-                }
+    private func group(_ title: String, note: String, color: Color, status: Finding.Status) -> some View {
+        let items = model.groups
+            .filter { $0.findings.contains { $0.status == status } }
+            .map { CleanRowItem(group: $0, status: status) }
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                SectionHeading(title: title, note: note, color: color)
+                RowsCard(items: items, dividerInset: 16) { CleanRuleRow(item: $0) }
             }
         }
     }
 
-    @ViewBuilder private var skippedSection: some View {
-        let skipped = model.groups.flatMap { g in g.findings.filter { $0.status == .skipped }.map { (g.rule, $0) } }
-        if !skipped.isEmpty {
-            Section("Left Alone for Now") {
-                ForEach(skipped, id: \.1.path) { rule, finding in
-                    Label {
-                        Text("\(rule.title): \(reason(finding))").foregroundStyle(.secondary)
-                    } icon: {
-                        Image(systemName: "lock").foregroundStyle(.secondary)
-                    }
+    private var skipped: [(rule: Rule, finding: Finding)] {
+        model.groups.flatMap { g in g.findings.filter { $0.status == .skipped }.map { (g.rule, $0) } }
+    }
+
+    private var footer: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            InfoNote(symbol: "checkmark.shield",
+                     text: "Files apps make again are removed right away, so you get the space now. Anything else goes to Recently Removed for 30 days, so you can put it back.")
+            let skipped = self.skipped
+            if !skipped.isEmpty {
+                HStack(spacing: 6) {
+                    InfoNote(text: "\(skipped.count) \(skipped.count == 1 ? "thing was" : "things were") left alone for now.")
+                    Button("Show") { showingSkipped = true }
+                        .buttonStyle(.link)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Theme.accentText)
+                        .popover(isPresented: $showingSkipped, arrowEdge: .bottom) {
+                            CleanSkippedList(items: skipped)
+                        }
                 }
             }
         }
+        .padding(.horizontal, 4)
+    }
+}
+
+/// One rule in one section, as a row.
+struct CleanRowItem: Identifiable {
+    let group: CleanupPlan.Group
+    let status: Finding.Status
+    var id: String { group.rule.id + "|" + status.rawValue }
+    var findings: [Finding] { group.findings.filter { $0.status == status } }
+}
+
+struct CleanRuleRow: View {
+    @Environment(AppModel.self) private var model
+    let item: CleanRowItem
+    @State private var showingItems = false
+
+    private var isOn: Bool { item.findings.allSatisfy { model.selection.contains($0.path) } }
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Toggle("Include \(item.group.rule.title)", isOn: Binding(get: { isOn }, set: { model.toggle(item.group, on: $0) }))
+                .toggleStyle(.checkbox)
+                .labelsHidden()
+            RuleIcon(rule: item.group.rule)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.group.rule.title).font(.system(size: 14, weight: .semibold))
+                Text(item.group.rule.explanation).font(.system(size: 12)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if item.findings.contains(where: { $0.fillsQuickly == true }) {
+                    Label("Filled up again within two days last time, so cleaning it only helps briefly.", systemImage: "arrow.clockwise")
+                        .font(.system(size: 12)).foregroundStyle(Theme.orange)
+                }
+            }
+            Spacer(minLength: 12)
+            VStack(alignment: .trailing, spacing: 2) {
+                SizeText(bytes: model.bytes(of: item.findings))
+                if item.findings.count > 1 {
+                    Text("\(item.findings.count) items").font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+            }
+            Button { showingItems = true } label: {
+                Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(.tertiary)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Show what's in \(item.group.rule.title)")
+            .popover(isPresented: $showingItems, arrowEdge: .trailing) {
+                CleanItemsList(rule: item.group.rule, findings: item.findings)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            model.focusedPath = item.findings.first?.path
+            model.toggle(item.group, on: !isOn)
+        }
+    }
+}
+
+/// What a rule found, one line per folder or file.
+struct CleanItemsList: View {
+    let rule: Rule
+    let findings: [Finding]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(rule.title).font(.headline)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(findings.sorted { $0.usage.bytes > $1.usage.bytes }, id: \.path) { finding in
+                        HStack(spacing: 10) {
+                            Image(nsImage: NSWorkspace.shared.icon(forFile: finding.path))
+                                .resizable().frame(width: 18, height: 18).accessibilityHidden(true)
+                            Text(tildePath(finding.path)).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
+                            Spacer(minLength: 8)
+                            Text(formatBytes(finding.usage.bytes)).font(.system(size: 12, weight: .semibold)).monospacedDigit()
+                            Button {
+                                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: finding.path)])
+                            } label: {
+                                Image(systemName: "magnifyingglass")
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Show in Finder")
+                            .accessibilityLabel("Show \(URL(fileURLWithPath: finding.path).lastPathComponent) in Finder")
+                        }
+                        .padding(.vertical, 5)
+                        Divider()
+                    }
+                }
+            }
+            .frame(maxHeight: 320)
+        }
+        .padding(16)
+        .frame(width: 460)
+    }
+}
+
+/// Why some things weren't offered.
+struct CleanSkippedList: View {
+    let items: [(rule: Rule, finding: Finding)]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Left Alone for Now").font(.headline)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(items, id: \.finding.path) { rule, finding in
+                        Label {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(rule.title).font(.system(size: 13, weight: .semibold))
+                                Text(reason(finding)).font(.system(size: 12)).foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: "lock").foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .frame(maxHeight: 280)
+        }
+        .padding(16)
+        .frame(width: 360)
     }
 
     private func reason(_ f: Finding) -> String {
         switch f.skipReason {
         case .appRunning:
             let name = f.blockingApp.flatMap { NSRunningApplication.runningApplications(withBundleIdentifier: $0).first?.localizedName } ?? f.blockingApp ?? "an app"
-            return "\(name) is open"
-        case .symbolicLink: return "it's a link to somewhere else"
-        default: return "it's outside your home folder"
+            return "\(name) is open. Quit it and check again."
+        case .symbolicLink: return "It's a link to somewhere else."
+        case .protected: return "It's in a place Vulture never touches."
+        default: return "It's outside your home folder."
         }
     }
 }
 
-struct RuleRow: View {
-    @Environment(AppModel.self) private var model
-    let group: CleanupPlan.Group
-    let status: Finding.Status
+/// `~/Library/Caches/…` instead of the full path.
+func tildePath(_ path: String) -> String {
+    let home = FileManager.default.homeDirectoryForCurrentUser.path
+    return path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
+}
 
-    private var items: [Finding] { group.findings.filter { $0.status == status } }
-    private var isOn: Bool { items.allSatisfy { model.selection.contains($0.path) } }
-
-    var body: some View {
-        HStack(spacing: 14) {
-            Toggle("Include \(group.rule.title)", isOn: Binding(get: { isOn }, set: { model.toggle(group, on: $0) }))
-                .toggleStyle(.checkbox)
-                .labelsHidden()
-            RuleIcon(rule: group.rule)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(group.rule.title).font(.body.weight(.semibold))
-                Text(group.rule.explanation).font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                if items.contains(where: { $0.fillsQuickly == true }) {
-                    Label("Filled up again within two days last time, so cleaning it only helps briefly.", systemImage: "arrow.clockwise")
-                        .font(.caption).foregroundStyle(.orange)
-                }
-            }
-            Spacer(minLength: 12)
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(formatBytes(model.bytes(of: items))).font(.body.weight(.semibold)).monospacedDigit()
-                if items.count > 1 { Text("\(items.count) items").font(.caption).foregroundStyle(.secondary) }
-            }
+extension View {
+    /// The filled toolbar button for the screen's main action.
+    @ViewBuilder
+    func cleanUpProminent() -> some View {
+        if #available(macOS 26.0, *) {
+            self.buttonStyle(.glassProminent)
+        } else {
+            self.buttonStyle(.borderedProminent)
         }
-        .padding(.vertical, 6)
-        .contentShape(Rectangle())
-        .onTapGesture { model.toggle(group, on: !isOn) }
     }
 }
 
@@ -148,34 +299,30 @@ struct RuleIcon: View {
             if let id = rule.closeFirst.first, let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
                 Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable()
             } else {
-                Image(systemName: symbol)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(.white)
-                    .frame(width: 32, height: 32)
-                    .background(tint.gradient, in: RoundedRectangle(cornerRadius: 8))
+                IconTile(symbol: symbol, color: tint, size: 32)
             }
         }
-        .frame(width: 34, height: 34)
+        .frame(width: 36, height: 36)
         .accessibilityHidden(true)
     }
 
     private var symbol: String {
         switch rule.category {
-        case .appFiles: "square.stack.3d.up"
-        case .logs: "doc.text"
-        case .developer: "hammer"
-        case .downloads: "arrow.down.circle"
+        case .appFiles: "square.stack.3d.up.fill"
+        case .logs: "doc.text.fill"
+        case .developer: "hammer.fill"
+        case .downloads: "arrow.down.circle.fill"
         case .mail: "paperclip"
         }
     }
 
     private var tint: Color {
         switch rule.category {
-        case .appFiles: .blue
-        case .logs: .gray
-        case .developer: .indigo
-        case .downloads: .teal
-        case .mail: .cyan
+        case .appFiles: Theme.blue
+        case .logs: Theme.gray
+        case .developer: Theme.teal
+        case .downloads: Theme.amber
+        case .mail: Theme.purple
         }
     }
 }
