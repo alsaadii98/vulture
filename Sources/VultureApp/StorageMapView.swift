@@ -503,7 +503,7 @@ private struct ItemDetail: View {
     let open: () -> Void
 
     private var rule: Rule? { MapGuide.rule(covering: item.path, rules: model.rules, home: home) }
-    private var warning: String? { MapGuide.warning(for: item.path, home: home, policy: SafetyPolicy(home: home)) }
+    private var warning: String? { MapGuide.warning(for: item.path, home: home, policy: Preferences.safetyPolicy(home: home)) }
     private var isDocker: Bool { item.path.contains("com.docker.docker") || item.name == "Docker.raw" }
 
     private var app: String? {

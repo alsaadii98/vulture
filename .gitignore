@@ -6,3 +6,6 @@
 xcuserdata/
 DerivedData/
 /build
+
+# Agent worktrees
+/.claude/worktrees/

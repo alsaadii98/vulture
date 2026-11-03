@@ -49,6 +49,14 @@ public struct SafetyPolicy: Sendable {
         self.protectedPaths = protectedPaths
     }
 
+    /// The standard protections plus folders the person chose in Settings › Safety › Never Touch These.
+    /// Folders outside the home folder are ignored: Vulture never touches anything there anyway.
+    public init(home: URL, alsoProtecting folders: [URL]) {
+        let base = SafetyPolicy(home: home)
+        let extra = folders.compactMap { base.relativePath($0) }
+        self.init(home: home, protectedPaths: SafetyPolicy.standardProtectedPaths + extra)
+    }
+
     /// The home-relative form of `url`, or nil when it isn't inside the home folder.
     public func relativePath(_ url: URL) -> String? {
         let base = home.path.hasSuffix("/") ? home.path : home.path + "/"
