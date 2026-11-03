@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="Assets/banner-dark.png">
-    <img src="Assets/banner-light.png" alt="Vulture: free up space on your Mac, and know exactly what you're removing." width="100%">
+    <img src="Assets/banner-light.png" alt="Vulture: free up space on your Mac, and know what you're removing. The app's Clean Up screen lists each item with a plain explanation and its size." width="100%">
   </picture>
 </p>
 
