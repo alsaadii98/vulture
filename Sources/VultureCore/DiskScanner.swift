@@ -80,8 +80,8 @@ public final class DiskScanner: @unchecked Sendable {
         }
     }
 
-    /// Measures each item directly inside `url`, largest first.
-    public func children(of url: URL) -> [DiskEntry] {
+    /// Measures each item directly inside `url`, largest first. Items named in `skipping` aren't measured.
+    public func children(of url: URL, skipping names: Set<String> = []) -> [DiskEntry] {
         let fd = open(url.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
         guard fd >= 0 else { return [] }
         defer { close(fd) }
@@ -90,6 +90,8 @@ public final class DiskScanner: @unchecked Sendable {
         let device = st.st_dev
         var listing = DirectoryListing()
         read(fd, into: &listing)
+        listing.files.removeAll { names.contains($0.name) }
+        listing.directories.removeAll { names.contains($0) }
 
         var result = listing.files.map { DiskEntry(name: $0.name, isDirectory: false, usage: $0.usage) }
         let dirs = listing.directories

@@ -138,6 +138,20 @@ final class AppModel {
         refreshRemoved()
     }
 
+    var storage: StorageReport?
+    var measuringStorage = false
+
+    func measureStorage() async {
+        guard !measuringStorage else { return }
+        measuringStorage = true
+        let home = home
+        storage = await Task.detached(priority: .userInitiated) {
+            StorageAnalyzer.analyze(home: home, scanner: DiskScanner(skipping: Privacy.foldersToSkip(home: home)))
+        }.value
+        measuringStorage = false
+        refreshDisk()
+    }
+
     func putBack(_ batchID: String) {
         do {
             let failures = try store.putBack(batchID: batchID)

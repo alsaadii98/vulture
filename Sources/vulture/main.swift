@@ -18,6 +18,7 @@ let usage = """
       vulture removed [--json]                List what's in Recently Removed
       vulture restore ID [--yes]              Put back everything from one clean-up
       vulture empty [--all] [--yes]           Remove expired clean-ups for good (--all: everything)
+      vulture storage [--json]                What's using space on this Mac, by kind
       vulture size [PATH] [--json] [--top N]  Measure a folder (default: your home folder)
       vulture rules [--json] [--rules DIR]    List the cleaning rules
       vulture check-rules DIR                 Check rule files for mistakes (for contributors)
@@ -166,6 +167,24 @@ func isDirectory(_ url: URL) -> Bool {
     return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
 }
 
+func storage(json: Bool) throws {
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    let report = StorageAnalyzer.analyze(home: home, scanner: DiskScanner(skipping: Privacy.foldersToSkip(home: home)))
+    if json { return try printJSON(report) }
+    let names: [StorageReport.Kind: String] = [
+        .apps: "Apps", .documents: "Documents and downloads", .media: "Photos, music and videos", .coding: "Coding apps' files",
+        .appData: "App data", .otherFiles: "Other files in your home folder", .system: "macOS and System Data",
+    ]
+    print("\(size(report.freeBytes)) free of \(size(report.totalBytes))\n")
+    for c in report.categories.sorted(by: { $0.bytes > $1.bytes }) where c.bytes > 0 {
+        let share = report.usedBytes > 0 ? Int((Double(c.bytes) / Double(report.usedBytes) * 100).rounded()) : 0
+        print("  \(padded(names[c.kind] ?? c.kind.rawValue, 34)) \(padded(size(c.bytes), 10)) \(share)%")
+    }
+    if report.unreadable > 0 {
+        print("\n\(report.unreadable) folders couldn't be read; their space is counted under macOS and System Data.")
+    }
+}
+
 func rulesCommand(json: Bool) throws {
     let rules = try loadRules()
     if json { return try printJSON(rules) }
@@ -295,6 +314,7 @@ do {
     switch command {
     case "scan": try scan(json: json)
     case "size": try sizeCommand(json: json)
+    case "storage": try storage(json: json)
     case "rules": try rulesCommand(json: json)
     case "check-rules": try checkRules()
     case "clean": try clean(json: json)

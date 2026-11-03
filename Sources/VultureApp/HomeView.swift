@@ -17,9 +17,7 @@ struct HomeView: View {
                     .background(.background.secondary, in: RoundedRectangle(cornerRadius: 14))
                 if !model.hasFullDiskAccess {
                     Notice(symbol: "lock.shield", text: "Vulture can't see everything yet. Give it Full Disk Access in System Settings › Privacy & Security to find more.") {
-                        Button("Open Settings") {
-                            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
-                        }
+                        Button("Open Settings") { openPrivacySettings() }
                     }
                 }
             }

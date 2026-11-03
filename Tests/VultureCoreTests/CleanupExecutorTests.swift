@@ -29,6 +29,31 @@ import Testing
         CleanupExecutor(policy: policy, store: store, runningApps: { running })
     }
 
+    @Test func leavesFoldersWithAnOpenFileAlone() throws {
+        let file = try fx.file("Library/Caches/com.example.Busy/db.sqlite")
+        try fx.file("Library/Caches/com.example.Idle/x")
+        let handle = try FileHandle(forReadingFrom: file)
+        defer { try? handle.close() }
+        let p = plan([cacheRule])
+        // This process is skipped by snapshot(), so hand the open file in directly.
+        let open = OpenFiles(paths: [realPath(file.path)!])
+        let result = CleanupExecutor(policy: policy, store: store, runningApps: { [] }, openFiles: { open }).run(p, selected: everything(p))
+        #expect(result.failures.map { URL(fileURLWithPath: $0.path).lastPathComponent } == ["com.example.Busy"])
+        #expect(Glob.exists(file))
+        #expect(!Glob.exists(fx.url("Library/Caches/com.example.Idle")))
+    }
+
+    @Test func seesFilesOtherProcessesHaveOpen() throws {
+        let file = try fx.file("held.log")
+        let child = Process()
+        child.executableURL = URL(fileURLWithPath: "/bin/sh")
+        child.arguments = ["-c", "exec 3<\"$0\"; sleep 5", file.path]
+        try child.run()
+        defer { child.terminate() }
+        Thread.sleep(forTimeInterval: 0.3)
+        #expect(OpenFiles.snapshot().firstOpen(inside: realPath(fx.home.path)!) != nil)
+    }
+
     func plan(_ rules: [Rule]) -> CleanupPlan {
         CleanupPlanner(rules: rules, policy: policy, runningApps: []).plan()
     }

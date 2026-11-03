@@ -1,0 +1,31 @@
+# Vulture — a free, open-source cleaner and disk tool for macOS.
+# Copyright (C) 2026 Vulture contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show toolchain
+        run: swift --version
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test
+      - name: Check rules
+        run: swift run vulture check-rules Sources/VultureCore/Rules
+      - name: Check license headers
+        run: |
+          missing=$(grep -L "SPDX-License-Identifier: GPL-3.0-or-later" $(git ls-files '*.swift' '*.sh' '*.yml'))
+          if [ -n "$missing" ]; then echo "Missing license header:"; echo "$missing"; exit 1; fi

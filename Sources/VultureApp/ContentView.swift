@@ -7,10 +7,19 @@ import VultureCore
 
 struct ContentView: View {
     @Environment(AppModel.self) private var model
+    @AppStorage("didOnboard") private var didOnboard = false
 
     var body: some View {
+        if didOnboard {
+            main.transition(.opacity)
+        } else {
+            OnboardingView()
+        }
+    }
+
+    private var main: some View {
         @Bindable var model = model
-        NavigationSplitView {
+        return NavigationSplitView {
             Sidebar()
                 .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
         } detail: {
@@ -20,14 +29,14 @@ struct ContentView: View {
                 case .clean: CleanUpView()
                 case .removed: RecentlyRemovedView()
                 case .apps: ComingSoon(section: .apps, text: "See every app with its real size, and remove apps together with the settings and helpers they leave behind.")
-                case .storage: ComingSoon(section: .storage, text: "See what's using space on your Mac, in the same words you'd use.")
+                case .storage: StorageView()
                 case .startup: ComingSoon(section: .startup, text: "See which apps start by themselves and how much they slow your Mac down.")
                 }
             }
             .transition(.opacity)
             .animation(.easeOut(duration: 0.2), value: model.section)
         }
-        .task { if model.plan == nil { await model.scan() } }
+        .task { if model.plan == nil, case .idle = model.phase { await model.scan() } }
         .alert("Something went wrong", isPresented: Binding(get: { model.problem != nil }, set: { if !$0 { model.problem = nil } })) {
             Button("OK") { model.problem = nil }
         } message: {

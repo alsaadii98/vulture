@@ -39,22 +39,27 @@ public struct CleanupExecutor: Sendable {
     public let store: RecentlyRemoved
     /// Asked again at the moment of cleaning, not reused from the scan.
     public let runningApps: @Sendable () -> Set<String>
+    /// Files any process has open, also asked at the moment of cleaning.
+    public let openFiles: @Sendable () -> OpenFiles
 
-    public init(policy: SafetyPolicy, store: RecentlyRemoved, runningApps: @escaping @Sendable () -> Set<String>) {
+    public init(policy: SafetyPolicy, store: RecentlyRemoved, runningApps: @escaping @Sendable () -> Set<String>,
+                openFiles: @escaping @Sendable () -> OpenFiles = { OpenFiles.snapshot() }) {
         self.policy = policy
         self.store = store
         self.runningApps = runningApps
+        self.openFiles = openFiles
     }
 
     public func run(_ plan: CleanupPlan, selected: Set<String>, title: String = "Clean-up", now: Date = Date()) -> CleanupResult {
         var result = CleanupResult()
         let running = runningApps()
+        let open = openFiles()
         var batch: RemovedBatch?
 
         for group in plan.groups {
             for finding in group.findings where selected.contains(finding.path) {
                 let url = URL(fileURLWithPath: finding.path)
-                if let reason = problem(with: finding, rule: group.rule, running: running) {
+                if let reason = problem(with: finding, rule: group.rule, running: running, open: open) {
                     result.failures.append(.init(path: finding.path, reason: reason))
                     continue
                 }
@@ -76,7 +81,7 @@ public struct CleanupExecutor: Sendable {
         return result
     }
 
-    private func problem(with finding: Finding, rule: Rule, running: Set<String>) -> String? {
+    private func problem(with finding: Finding, rule: Rule, running: Set<String>, open: OpenFiles) -> String? {
         if finding.status == .skipped { return "it was left alone in the scan" }
         let url = URL(fileURLWithPath: finding.path)
         if let reason = policy.check(url) { return "safety check: \(reason.rawValue)" }
@@ -85,6 +90,7 @@ public struct CleanupExecutor: Sendable {
         if let id = finding.fileID, UInt64(st.st_ino) != id { return "it changed since the scan" }
         if let app = rule.closeFirst.first(where: running.contains) { return "\(app) is open" }
         if rule.entryNameIsBundleID, running.contains(url.lastPathComponent) { return "\(url.lastPathComponent) is open" }
+        if open.firstOpen(inside: realPath(url.path) ?? url.path) != nil { return "an app is using a file inside it" }
         return nil
     }
 }
