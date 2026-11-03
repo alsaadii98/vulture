@@ -142,7 +142,7 @@ private struct GeneralSettings: View {
                 }
             }
             SettingsGroup(title: "Startup", note: loginProblem) {
-                ToggleRow(title: "Open Vulture when you log in", isOn: Binding(get: { openAtLogin }, set: setOpenAtLogin))
+                ToggleRow(title: "Open Vulture when you log in", isOn: Binding(get: { openAtLogin }, set: { setOpenAtLogin($0) }))
             }
         }
     }
