@@ -3,18 +3,34 @@
 # Copyright (C) 2026 Vulture contributors
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Wraps the SwiftUI app target in a minimal .app bundle for local testing.
-# Release packaging (signing, notarization, app icon) comes later.
+# Builds build/Vulture.app with the `vulture` command-line tool inside it.
+#   scripts/make-app.sh                 debug build for this Mac
+#   scripts/make-app.sh release 1.0.0   release build for Apple silicon and Intel
 set -eu
 cd "$(dirname "$0")/.."
 config="${1:-debug}"
-swift build -c "$config" --product VultureApp
-bin="$(swift build -c "$config" --show-bin-path)"
+version="${2:-0.0.0-dev}"
+build="${3:-1}"
+
+if [ "$config" = release ]; then
+  arch_flags="--arch arm64 --arch x86_64"
+else
+  arch_flags=""
+fi
+# shellcheck disable=SC2086
+swift build -c "$config" $arch_flags --product VultureApp
+# shellcheck disable=SC2086
+swift build -c "$config" $arch_flags --product vulture
+# shellcheck disable=SC2086
+bin="$(swift build -c "$config" $arch_flags --show-bin-path)"
+
 app="build/Vulture.app"
 rm -rf "$app"
-mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$app/Contents/Helpers"
 cp "$bin/VultureApp" "$app/Contents/MacOS/Vulture"
 cp -R "$bin/Vulture_VultureCore.bundle" "$app/Contents/Resources/"
+# The command-line tool finds its rules in Contents/Resources.
+cp "$bin/vulture" "$app/Contents/Helpers/vulture"
 
 # App icon from the 1024 px master
 iconset="build/AppIcon.iconset"
@@ -30,15 +46,16 @@ cat > "$app/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleIdentifier</key><string>dev.vulture.Vulture</string>
+  <key>CFBundleIdentifier</key><string>io.github.alsaadii98.Vulture</string>
   <key>CFBundleName</key><string>Vulture</string>
   <key>CFBundleDisplayName</key><string>Vulture</string>
   <key>CFBundleExecutable</key><string>Vulture</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>$version</string>
+  <key>CFBundleVersion</key><string>$build</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
   <key>NSHumanReadableCopyright</key><string>Free and open source under GPL-3.0</string>
 </dict>
 </plist>

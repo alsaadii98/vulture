@@ -76,7 +76,7 @@ final class AppModel {
     init() {
         do {
             guard let dir = RuleLoader.bundledRulesDirectory() else { throw CocoaError(.fileNoSuchFile) }
-            rules = try RuleLoader.load(directory: dir)
+            rules = RuleUpdates.activeRules(home: home, bundled: try RuleLoader.load(directory: dir)).rules
         } catch {
             problem = "Vulture couldn't read its cleaning rules: \(error)"
         }
@@ -113,8 +113,12 @@ final class AppModel {
         phase = .scanning
         let rules = rules, home = home, running = Self.runningApps()
         let plan = await Task.detached(priority: .userInitiated) {
-            CleanupPlanner(rules: rules, policy: SafetyPolicy(home: home), runningApps: running)
+            let regrowth = RegrowthTracker.standard(home: home)
+            let plan = CleanupPlanner(rules: rules, policy: SafetyPolicy(home: home), runningApps: running,
+                                      quicklyRefilling: regrowth.quicklyRefilling())
                 .plan(scanner: DiskScanner(skipping: Privacy.foldersToSkip(home: home)))
+            try? regrowth.observe(plan)
+            return plan
         }.value
         self.plan = plan
         selection = plan.defaultSelection
@@ -129,8 +133,10 @@ final class AppModel {
         let selected = selection, home = home, store = store
         _ = try? store.empty() // clean-ups past their 30 days
         async let result = Task.detached(priority: .userInitiated) {
-            CleanupExecutor(policy: SafetyPolicy(home: home), store: store, runningApps: { AppModel.runningApps() })
+            let result = CleanupExecutor(policy: SafetyPolicy(home: home), store: store, runningApps: { AppModel.runningApps() })
                 .run(plan, selected: selected)
+            try? RegrowthTracker.standard(home: home).noteCleaned(result.removedForGood)
+            return result
         }.value
         // Long enough to see that something happened, even when it's instant.
         try? await Task.sleep(for: .milliseconds(900))
@@ -144,6 +150,7 @@ final class AppModel {
     var storage: StorageReport?
     var measuringStorage = false
     var snapshots: [Date] = []
+    var weeklyChange: (since: Date, freeDelta: Int64, changes: [SpaceHistory.Change])?
 
     // MARK: Developer Files
 
@@ -219,6 +226,11 @@ final class AppModel {
             StorageAnalyzer.analyze(home: home, scanner: DiskScanner(skipping: Privacy.foldersToSkip(home: home)))
         }.value
         snapshots = await Task.detached { TimeMachine.localSnapshots() }.value
+        if let storage {
+            let history = SpaceHistory.standard(home: home)
+            try? history.record(storage)
+            weeklyChange = history.changes(overDays: 7)
+        }
         measuringStorage = false
         refreshDisk()
     }

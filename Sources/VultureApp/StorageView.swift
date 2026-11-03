@@ -41,6 +41,8 @@ struct StorageView: View {
                 }
                 StorageBar(report: report, order: shown.map(\.kind))
 
+                WeeklyChangeCard()
+
                 let cleanable = model.selectedBytes
                 if cleanable > 0 {
                     Notice(symbol: "sparkles", text: "\(formatBytes(cleanable)) of this is leftovers you can safely remove.") {
@@ -211,5 +213,36 @@ struct SystemDataHelp: View {
                 .frame(width: 320)
                 .padding()
             }
+    }
+}
+
+/// "What ate my space this week?" — the biggest changes since a week ago, once there's a week of history.
+struct WeeklyChangeCard: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        if let week = model.weeklyChange, !week.changes.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Since \(week.since.formatted(date: .abbreviated, time: .omitted))").font(.headline)
+                    Spacer()
+                    Text(week.freeDelta >= 0 ? "\(formatBytes(week.freeDelta)) more free space" : "\(formatBytes(-week.freeDelta)) less free space")
+                        .foregroundStyle(week.freeDelta >= 0 ? Color.green : Color.orange)
+                }
+                ForEach(week.changes.prefix(4), id: \.kind) { change in
+                    HStack {
+                        Circle().fill(change.kind.color).frame(width: 8, height: 8)
+                        Text(change.kind.title)
+                        Spacer()
+                        Text("\(change.delta >= 0 ? "+" : "−")\(formatBytes(abs(change.delta)))")
+                            .monospacedDigit()
+                            .foregroundStyle(change.delta > 0 ? .primary : .secondary)
+                    }
+                    .font(.callout)
+                }
+            }
+            .padding(16)
+            .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
+        }
     }
 }

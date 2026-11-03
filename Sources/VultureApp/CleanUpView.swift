@@ -122,6 +122,10 @@ struct RuleRow: View {
                 Text(group.rule.title).font(.body.weight(.semibold))
                 Text(group.rule.explanation).font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                if items.contains(where: { $0.fillsQuickly == true }) {
+                    Label("Filled up again within two days last time, so cleaning it only helps briefly.", systemImage: "arrow.clockwise")
+                        .font(.caption).foregroundStyle(.orange)
+                }
             }
             Spacer(minLength: 12)
             VStack(alignment: .trailing, spacing: 2) {

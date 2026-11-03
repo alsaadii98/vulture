@@ -21,7 +21,14 @@ public enum RuleLoader {
 
     /// The rules that ship with Vulture.
     public static func bundledRulesDirectory() -> URL? {
-        Bundle.module.url(forResource: "Rules", withExtension: nil)
+        // The command-line tool inside Vulture.app (Contents/Helpers) uses the app's copy in Contents/Resources.
+        // Checked first because Bundle.module stops the program when it can't find its bundle.
+        if let exe = Bundle.main.executableURL?.resolvingSymlinksInPath() {
+            let inApp = exe.deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("Resources/Vulture_VultureCore.bundle/Rules")
+            if Glob.isRealDirectory(inApp) { return inApp }
+        }
+        return Bundle.module.url(forResource: "Rules", withExtension: nil)
     }
 
     /// Loads every `*.json` rule file in `directory`, throwing all problems found at once.

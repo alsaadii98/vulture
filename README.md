@@ -4,7 +4,7 @@ See what's filling up your Mac, and free up space without the worry.
 
 Vulture is a free, open-source cleaner and disk tool for macOS. It explains every file it offers to remove in plain words, never touches your documents, photos or messages, and keeps everything it removes in Recently Removed for 30 days.
 
-> **Status:** early development (phase 3 done). The engine, the `vulture` command-line tool and the Mac app work: Home, Clean Up, Apps, Storage, Startup, Recently Removed, Developer Files and an optional menu bar monitor. Not yet signed or notarized.
+> **Status:** early development (phase 4). The engine, the `vulture` command-line tool and the Mac app work: Home, Clean Up, Apps, Storage (with a weekly history), Startup, Recently Removed, Developer Files and an optional menu bar monitor. Releases aren't signed or notarized yet.
 
 ## Try it
 
@@ -24,6 +24,7 @@ swift build -c release
 .build/release/vulture uninstall Figma   # remove an app and what it keeps (undoable)
 .build/release/vulture leftovers     # files left by apps that are already gone
 .build/release/vulture startup       # what starts by itself
+.build/release/vulture history       # what changed on your disk this week
 .build/release/vulture size ~        # what's using space in a folder
 .build/release/vulture scan --json   # the same, for scripts and AI agents
 ```
@@ -32,11 +33,16 @@ swift build -c release
 
 For complete results, give your terminal **Full Disk Access** in System Settings › Privacy & Security. Without it, Vulture skips folders that hold other apps' private data rather than triggering a permission prompt.
 
+## Releases
+
+`scripts/release.sh VERSION` builds a universal `Vulture.app` (with the `vulture` tool in `Contents/Helpers`), a zip, a DMG and checksums in `build/release`. Pushing a `vX.Y.Z` tag does the same on GitHub and publishes a release. With a Developer ID certificate in the repository secrets (see `.github/workflows/release.yml`), the release is signed and notarized; without one it's published as a pre-release that macOS will warn about. A Homebrew cask for the project's tap is in `packaging/homebrew`.
+
 ## How it decides what's safe
 
 - **Rules, not guesses.** Every kind of removable file is described by a rule in [`Sources/VultureCore/Rules`](Sources/VultureCore/Rules), with a plain-language title and explanation. See [docs/rules.md](docs/rules.md).
 - **Hard limits no rule can override.** Your Documents, Desktop, Photos, Messages, Mail, iCloud Drive, keychains, SSH keys and AI assistants' chats are never offered. Neither is anything reached through a symbolic link.
-- **Open apps are left alone.** Files that belong to an app that's running are skipped until it's closed.
+- **Open apps are left alone.** Files that belong to an app that's running, or that any app has open, are skipped.
+- **Honest about caches that come back.** If a folder fills up again within two days of cleaning, Vulture stops recommending it and says so.
 
 ## Project layout
 

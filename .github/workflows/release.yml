@@ -1,0 +1,61 @@
+# Vulture — a free, open-source cleaner and disk tool for macOS.
+# Copyright (C) 2026 Vulture contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Push a tag like v1.0.0 to build, sign, notarize and publish a release.
+# Signing needs these repository secrets; without them the release is signed ad hoc and marked as a pre-release.
+#   DEVELOPER_ID_P12          base64 of the "Developer ID Application" certificate exported as .p12
+#   DEVELOPER_ID_P12_PASSWORD password of that .p12
+#   DEVELOPER_ID_NAME         e.g. "Developer ID Application: Your Name (TEAMID)"
+#   NOTARY_APPLE_ID, NOTARY_TEAM_ID, NOTARY_PASSWORD (an app-specific password)
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Test
+        run: swift test
+      - name: Set up signing
+        env:
+          P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          NAME: ${{ secrets.DEVELOPER_ID_NAME }}
+          APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+        run: |
+          if [ -z "$P12" ]; then echo "No signing secrets: building an ad hoc pre-release."; exit 0; fi
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          security create-keychain -p "" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "" "$keychain"
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" "$keychain"
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+          xcrun notarytool store-credentials vulture --apple-id "$APPLE_ID" --team-id "$TEAM_ID" --password "$NOTARY_PASSWORD" --keychain "$keychain"
+          echo "VULTURE_SIGN_IDENTITY=$NAME" >> "$GITHUB_ENV"
+          echo "VULTURE_NOTARY_PROFILE=vulture" >> "$GITHUB_ENV"
+      - name: Build release
+        run: scripts/release.sh "${GITHUB_REF_NAME#v}"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          flags=""
+          if [ -z "${VULTURE_SIGN_IDENTITY:-}" ]; then flags="--prerelease"; fi
+          gh release create "$GITHUB_REF_NAME" build/release/* --title "Vulture $version" --generate-notes $flags

@@ -6,7 +6,12 @@ import AppKit
 import Foundation
 import VultureCore
 
-let version = "0.1.0-dev"
+/// The app's version when this tool runs from inside Vulture.app, otherwise a development build.
+let version: String = {
+    guard let exe = Bundle.main.executableURL?.resolvingSymlinksInPath() else { return "dev" }
+    let plist = exe.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Info.plist")
+    return (NSDictionary(contentsOf: plist)?["CFBundleShortVersionString"] as? String) ?? "dev"
+}()
 
 let usage = """
     vulture \(version): see what's filling up your Mac, and free up space without the worry.
@@ -31,8 +36,13 @@ let usage = """
       vulture empty [--all] [--yes]           Remove expired clean-ups for good (--all: everything)
       vulture storage [--json]                What's using space on this Mac, by kind
       vulture size [PATH] [--json] [--top N]  Measure a folder (default: your home folder)
-      vulture rules [--json] [--rules DIR]    List the cleaning rules
+      vulture history [--days N]              What changed on your disk over the last N days (default 7)
+      vulture rules [--json] [--rules DIR]    List the cleaning rules in use
+      vulture rules install FILE              Install a signed rule pack
       vulture check-rules DIR                 Check rule files for mistakes (for contributors)
+      vulture rules keygen --out DIR          Make a rule-signing key (maintainers)
+      vulture rules pack DIR --version V --key FILE --out FILE
+                                              Sign rule files into a pack (maintainers)
       vulture --version
 
     """
@@ -60,7 +70,7 @@ func loadRules() throws -> [Rule] {
         return try RuleLoader.load(directory: URL(fileURLWithPath: (dir as NSString).expandingTildeInPath))
     }
     guard let dir = RuleLoader.bundledRulesDirectory() else { throw UsageError(message: "the built-in rules are missing from this build") }
-    return try RuleLoader.load(directory: dir)
+    return RuleUpdates.activeRules(home: FileManager.default.homeDirectoryForCurrentUser, bundled: try RuleLoader.load(directory: dir)).rules
 }
 
 func runningBundleIDs() -> Set<String> {
@@ -97,8 +107,11 @@ func appName(_ bundleID: String) -> String {
 func scan(json: Bool) throws {
     let rules = try loadRules()
     let home = FileManager.default.homeDirectoryForCurrentUser
-    let planner = CleanupPlanner(rules: rules, policy: SafetyPolicy(home: home), runningApps: runningBundleIDs())
+    let regrowth = RegrowthTracker.standard(home: home)
+    let planner = CleanupPlanner(rules: rules, policy: SafetyPolicy(home: home), runningApps: runningBundleIDs(),
+                                 quicklyRefilling: regrowth.quicklyRefilling())
     let plan = planner.plan(scanner: DiskScanner(skipping: Privacy.foldersToSkip()))
+    try? regrowth.observe(plan)
     if json { return try printJSON(plan) }
 
     let recommended = plan.bytes(.recommended), review = plan.bytes(.youDecide)
@@ -181,6 +194,7 @@ func isDirectory(_ url: URL) -> Bool {
 func storage(json: Bool) throws {
     let home = FileManager.default.homeDirectoryForCurrentUser
     let report = StorageAnalyzer.analyze(home: home, scanner: DiskScanner(skipping: Privacy.foldersToSkip(home: home)))
+    try? SpaceHistory.standard(home: home).record(report)
     if json { return try printJSON(report) }
     let names: [StorageReport.Kind: String] = [
         .apps: "Apps", .documents: "Documents and downloads", .media: "Photos, music and videos", .coding: "Coding apps' files",
@@ -196,7 +210,62 @@ func storage(json: Bool) throws {
     }
 }
 
+func history() throws {
+    let days = try option("--days").map { v -> Int in
+        guard let n = Int(v), n > 0 else { throw UsageError(message: "--days needs a positive number") }
+        return n
+    } ?? 7
+    guard let result = SpaceHistory.standard().changes(overDays: days) else {
+        return print("Not enough history yet. Vulture keeps one measurement a day; run vulture storage on different days, or open Storage in the app.")
+    }
+    let names: [StorageReport.Kind: String] = [
+        .apps: "Apps", .documents: "Documents and downloads", .media: "Photos, music and videos", .coding: "Coding apps' files",
+        .appData: "App data", .otherFiles: "Other files in your home folder", .system: "macOS and System Data",
+    ]
+    let free = result.freeDelta
+    print("Since \(result.since.formatted(date: .abbreviated, time: .omitted)): free space \(free >= 0 ? "went up" : "went down") by \(size(abs(free))).\n")
+    for c in result.changes {
+        print("  \(padded(names[c.kind] ?? c.kind.rawValue, 34)) \(c.delta >= 0 ? "+" : "−")\(size(abs(c.delta)))")
+    }
+}
+
+func rulesSubcommand(_ verb: String) throws {
+    switch verb {
+    case "install":
+        guard let file = arguments.first(where: { !$0.hasPrefix("-") }) else { throw UsageError(message: "rules install needs a pack file") }
+        let version = try RuleUpdates.install(Data(contentsOf: URL(fileURLWithPath: (file as NSString).expandingTildeInPath)),
+                                              home: FileManager.default.homeDirectoryForCurrentUser)
+        print("Installed rules version \(version). They're used from the next scan.")
+    case "keygen":
+        guard let out = try option("--out") else { throw UsageError(message: "rules keygen needs --out DIR") }
+        let dir = URL(fileURLWithPath: (out as NSString).expandingTildeInPath)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let key = RuleUpdates.makeKey()
+        let privateURL = dir.appendingPathComponent("vulture-rules-\(key.keyID).key")
+        guard !FileManager.default.fileExists(atPath: privateURL.path) else { throw UsageError(message: "\(privateURL.path) already exists") }
+        FileManager.default.createFile(atPath: privateURL.path, contents: Data(key.privateKey.utf8), attributes: [.posixPermissions: 0o600])
+        print("Private key: \(privateURL.path)  (keep it secret and offline; never commit it)")
+        print("Public key \(key.keyID): \(key.publicKey)")
+        print("Add the public key to RuleUpdates.trustedKeys to let Vulture accept packs signed with it.")
+    case "pack":
+        guard let dir = arguments.first(where: { !$0.hasPrefix("-") }) else { throw UsageError(message: "rules pack needs a folder of rule files") }
+        guard let version = try option("--version"), let keyFile = try option("--key"), let out = try option("--out") else {
+            throw UsageError(message: "rules pack needs --version, --key and --out")
+        }
+        let key = try String(contentsOfFile: (keyFile as NSString).expandingTildeInPath, encoding: .utf8)
+        let data = try RuleUpdates.pack(directory: URL(fileURLWithPath: (dir as NSString).expandingTildeInPath), version: version, privateKey: key)
+        try data.write(to: URL(fileURLWithPath: (out as NSString).expandingTildeInPath))
+        print("Signed rules version \(version) into \(out).")
+    default:
+        throw UsageError(message: "unknown rules command `\(verb)`")
+    }
+}
+
 func rulesCommand(json: Bool) throws {
+    if let verb = arguments.first, ["install", "keygen", "pack"].contains(verb) {
+        arguments.removeFirst()
+        return try rulesSubcommand(verb)
+    }
     let rules = try loadRules()
     if json { return try printJSON(rules) }
     for rule in rules {
@@ -238,7 +307,10 @@ func clean(json: Bool) throws {
     let withProjects = flag("--projects")
     let days = try option("--days").map { Int($0) ?? 90 } ?? 90
     let scanner = DiskScanner(skipping: Privacy.foldersToSkip())
-    var plan = CleanupPlanner(rules: rules, policy: policy, runningApps: runningBundleIDs()).plan(scanner: scanner)
+    let regrowth = RegrowthTracker.standard(home: home)
+    var plan = CleanupPlanner(rules: rules, policy: policy, runningApps: runningBundleIDs(), quicklyRefilling: regrowth.quicklyRefilling())
+        .plan(scanner: scanner)
+    try? regrowth.observe(plan)
     var selected = plan.defaultSelection
     if withProjects {
         let projects = ProjectFinder(home: home, untouchedDays: days).groups(policy: policy, scanner: scanner)
@@ -272,6 +344,7 @@ func clean(json: Bool) throws {
 
     let executor = CleanupExecutor(policy: policy, store: store, runningApps: { runningBundleIDs() })
     let result = executor.run(plan, selected: selected)
+    try? regrowth.noteCleaned(result.removedForGood)
     if json { return try printJSON(result) }
 
     print("\nDone. You freed \(size(result.freedBytes)).")
@@ -496,14 +569,16 @@ func emptyCommand() throws {
 // MARK: - Entry point
 
 do {
-    if flag("--version") { print(version); exit(0) }
-    if flag("--help") || flag("-h") || arguments.isEmpty { print(usage); exit(0) }
+    // Only as the first word, so options like `rules pack --version 2026.12.01` still work.
+    if arguments.first == "--version" { print(version); exit(0) }
+    if arguments.isEmpty || ["--help", "-h"].contains(arguments[0]) { print(usage); exit(0) }
     let command = arguments.removeFirst()
     let json = flag("--json")
     switch command {
     case "scan": try scan(json: json)
     case "size": try sizeCommand(json: json)
     case "storage": try storage(json: json)
+    case "history": try history()
     case "projects": try projects(json: json)
     case "dev": try dev(json: json)
     case "apps": try apps(json: json)

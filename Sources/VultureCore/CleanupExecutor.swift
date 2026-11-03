@@ -23,6 +23,8 @@ public struct CleanupResult: Codable, Sendable {
     public var keptBytes: Int64 = 0
     public var batchID: String?
     public var failures: [Failure] = []
+    /// What was removed for good, by path, so Vulture can later see whether it filled up again.
+    public var removedForGood: [String: Int64] = [:]
 
     public init() {}
 }
@@ -69,6 +71,7 @@ public struct CleanupExecutor: Sendable {
                     } else {
                         try Remover.removeForGood(url)
                         result.freedBytes += finding.usage.bytes
+                        result.removedForGood[finding.path] = finding.usage.bytes
                     }
                 } catch {
                     result.failures.append(.init(path: finding.path, reason: "\(error)"))

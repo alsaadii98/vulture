@@ -52,3 +52,15 @@ While scanning, every match is checked again: protected places, symbolic links a
 ## Choosing `safe` or `review`
 
 Use `safe` only when the owning app recreates the files by itself and nothing the person made is lost. Anything that can't come back, takes a long time to rebuild, or might hold someone's work is `review`.
+
+## Publishing rule updates
+
+Rules can be updated without a new app release, as a signed pack:
+
+```sh
+vulture rules keygen --out ~/secure-place          # once; keep the private key offline
+vulture rules pack Sources/VultureCore/Rules --version 2026.12.01 --key ~/secure-place/vulture-rules-XXXX.key --out rules-2026.12.01.vulturerules
+vulture rules install rules-2026.12.01.vulturerules
+```
+
+Vulture only uses a pack when a public key in `RuleUpdates.trustedKeys` verifies its signature, its version is newer than the rules in use, and every rule passes the checks above. The list of trusted keys is empty until the project publishes its first key, so today only the built-in rules are used. Vulture never downloads rules by itself.

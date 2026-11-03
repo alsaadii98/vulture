@@ -24,6 +24,8 @@ public struct Finding: Codable, Hashable, Sendable {
     public var blockingApp: String?
     /// The item's identity when it was measured, so a clean-up can tell if something else took its place since.
     public var fileID: UInt64?
+    /// Seen filling up again within days of an earlier clean-up, so it's no longer recommended.
+    public var fillsQuickly: Bool?
 }
 
 /// Everything a scan found, grouped by rule. Nothing is removed while planning.
@@ -67,12 +69,15 @@ public struct CleanupPlanner: Sendable {
     /// Bundle identifiers of the apps open right now.
     public let runningApps: Set<String>
     public let now: Date
+    /// Paths that filled up again quickly after an earlier clean-up (from `RegrowthTracker`).
+    public let quicklyRefilling: Set<String>
 
-    public init(rules: [Rule], policy: SafetyPolicy, runningApps: Set<String>, now: Date = Date()) {
+    public init(rules: [Rule], policy: SafetyPolicy, runningApps: Set<String>, now: Date = Date(), quicklyRefilling: Set<String> = []) {
         self.rules = rules
         self.policy = policy
         self.runningApps = runningApps
         self.now = now
+        self.quicklyRefilling = quicklyRefilling
     }
 
     public func plan(scanner: DiskScanner = DiskScanner()) -> CleanupPlan {
@@ -127,6 +132,9 @@ public struct CleanupPlanner: Sendable {
             ?? (rule.entryNameIsBundleID && runningApps.contains(url.lastPathComponent) ? url.lastPathComponent : nil)
         if let blocker {
             return Finding(ruleID: rule.id, path: path, usage: usage, status: .skipped, skipReason: .appRunning, blockingApp: blocker, fileID: fileID)
+        }
+        if quicklyRefilling.contains(path) {
+            return Finding(ruleID: rule.id, path: path, usage: usage, status: .youDecide, fileID: fileID, fillsQuickly: true)
         }
         return Finding(ruleID: rule.id, path: path, usage: usage, status: rule.safety == .safe ? .recommended : .youDecide, fileID: fileID)
     }
