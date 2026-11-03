@@ -176,12 +176,12 @@ final class AppModel {
     func loadDev() async {
         guard !loadingDev else { return }
         loadingDev = true
-        let home = home
+        let home = home, days = projectDays
         let report = await Task.detached(priority: .userInitiated) {
             let scanner = DiskScanner(skipping: Privacy.foldersToSkip(home: home))
             return DevReport(simulators: Simulators.report(home: home, scanner: scanner),
                              docker: Docker.report(),
-                             projects: ProjectFinder(home: home).groups(policy: SafetyPolicy(home: home), scanner: scanner))
+                             projects: ProjectFinder(home: home, untouchedDays: days).groups(policy: SafetyPolicy(home: home), scanner: scanner))
         }.value
         dev = report
         // "You decide" items start unselected, as in Clean Up.
@@ -460,6 +460,49 @@ final class AppModel {
     nonisolated static func runningApps() -> Set<String> {
         Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
     }
+
+    // MARK: - Fork C
+
+    /// Developer Files: projects untouched for at least this many days are listed.
+    var projectDays = 90
+    var loadingProjects = false
+
+    /// Looks for old projects again with a different "not opened for" threshold.
+    func reloadProjects(days: Int) async {
+        projectDays = days
+        guard dev != nil else { return }
+        loadingProjects = true
+        let home = home
+        let projects = await Task.detached(priority: .userInitiated) {
+            ProjectFinder(home: home, untouchedDays: days)
+                .groups(policy: SafetyPolicy(home: home), scanner: DiskScanner(skipping: Privacy.foldersToSkip(home: home)))
+        }.value
+        dev?.projects = projects
+        projectSelection.formIntersection(projects.flatMap(\.findings).map(\.path))
+        loadingProjects = false
+    }
+
+    /// Cleans only the given items from the Clean Up plan (Developer Files' rule-backed rows), the same way Clean Up does.
+    func cleanPlanItems(_ paths: Set<String>, title: String) async {
+        guard let plan, !paths.isEmpty else { return }
+        devBusy = "Removing \(title.lowercased())…"
+        let home = home, store = store
+        let result = await Task.detached(priority: .userInitiated) {
+            let result = CleanupExecutor(policy: SafetyPolicy(home: home), store: store, runningApps: { AppModel.runningApps() })
+                .run(plan, selected: paths, title: title)
+            try? RegrowthTracker.standard(home: home).noteCleaned(result.removedForGood)
+            return result
+        }.value
+        lastProjectResult = result
+        selection.subtract(paths)
+        devBusy = nil
+        refreshDisk()
+        refreshRemoved()
+        await scan()
+    }
+
+    /// Storage Map: folder sizes measured so far, kept while Vulture is open.
+    @ObservationIgnored lazy var folderSizes = FolderSizes(skipping: Privacy.foldersToSkip(home: home))
 }
 
 func formatBytes(_ bytes: Int64) -> String {
