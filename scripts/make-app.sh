@@ -32,6 +32,13 @@ cp -R "$bin/Vulture_VultureCore.bundle" "$app/Contents/Resources/"
 # The command-line tool finds its rules in Contents/Resources.
 cp "$bin/vulture" "$app/Contents/Helpers/vulture"
 
+# SwiftPM records the deployment target as the SDK version, which makes macOS treat Vulture as an
+# old app and turn off Liquid Glass. Record the SDK it was really built with.
+sdk="$(xcrun --sdk macosx --show-sdk-version)"
+for binary in "$app/Contents/MacOS/Vulture" "$app/Contents/Helpers/vulture"; do
+  vtool -set-build-version macos 14.0 "$sdk" -replace -output "$binary" "$binary"
+done
+
 # App icon from the 1024 px master
 iconset="build/AppIcon.iconset"
 rm -rf "$iconset" && mkdir -p "$iconset"
@@ -60,4 +67,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+# Sign ad hoc so it runs; release.sh signs again with the release certificate.
+codesign --force --sign - "$app/Contents/Helpers/vulture"
+codesign --force --sign - "$app"
 echo "$app"

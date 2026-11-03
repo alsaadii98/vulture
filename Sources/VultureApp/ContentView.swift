@@ -10,11 +10,19 @@ struct ContentView: View {
     @AppStorage("didOnboard") private var didOnboard = false
 
     var body: some View {
-        if didOnboard {
-            main.transition(.opacity)
-        } else {
-            OnboardingView()
+        Group {
+            if didOnboard {
+                main.transition(.opacity)
+            } else {
+                OnboardingView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .screenBackground()
+                    .hideWindowTitle()
+            }
         }
+        // Vulture's blue, whatever accent color the Mac uses.
+        .tint(Theme.accent)
+        .borderlessWindowChrome()
     }
 
     private var main: some View {
@@ -45,6 +53,27 @@ struct ContentView: View {
         } message: {
             Text(model.problem ?? "")
         }
+    }
+}
+
+extension View {
+    /// Like Telegram and the design: no title bar strip, content runs to the top edge, and the
+    /// traffic lights sit on the floating sidebar.
+    @ViewBuilder
+    func borderlessWindowChrome() -> some View {
+        if #available(macOS 15.0, *) {
+            self.toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        } else {
+            self
+        }
+    }
+}
+
+extension View {
+    /// No "Vulture" title text in the window's top strip.
+    @ViewBuilder
+    func hideWindowTitle() -> some View {
+        if #available(macOS 15.0, *) { self.toolbar(removing: .title) } else { self }
     }
 }
 
