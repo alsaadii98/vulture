@@ -85,8 +85,7 @@ struct Sidebar: View {
     @AppStorage("showStorageMap") private var showStorageMap = false
 
     var body: some View {
-        @Bindable var model = model
-        List(selection: $model.section) {
+        List {
             Section {
                 ForEach([SidebarSection.home, .clean, .apps, .storage, .startup]) { row($0) }
             }
@@ -120,17 +119,30 @@ struct Sidebar: View {
         .padding(.top, 8)
     }
 
+    /// A row with the design's soft gray selection rather than the Mac's accent color.
     private func row(_ section: SidebarSection) -> some View {
-        HStack(spacing: 10) {
-            IconTile(symbol: section.symbol, color: section.tint, size: 24)
-            Text(section.title).font(.system(size: 13))
-            Spacer(minLength: 4)
-            if let badge = badge(section) {
-                Text(badge).font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit()
+        let selected = (model.section ?? .home) == section
+        return Button {
+            model.section = section
+        } label: {
+            HStack(spacing: 10) {
+                IconTile(symbol: section.symbol, color: section.tint, size: 24)
+                Text(section.title).font(.system(size: 13, weight: selected ? .semibold : .regular))
+                Spacer(minLength: 4)
+                if let badge = badge(section) {
+                    Text(badge).font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit()
+                }
             }
+            .padding(.vertical, 5)
+            .padding(.horizontal, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .background(selected ? Theme.track : .clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
-        .padding(.vertical, 3)
-        .tag(section)
+        .buttonStyle(.plain)
+        .listRowInsets(EdgeInsets(top: 1, leading: 2, bottom: 1, trailing: 2))
+        .listRowBackground(Color.clear)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private func badge(_ section: SidebarSection) -> String? {

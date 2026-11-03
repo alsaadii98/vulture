@@ -135,7 +135,10 @@ final class MonitorModel {
 }
 
 func formatRate(_ bytesPerSecond: Double) -> String {
-    ByteCountFormatter.string(fromByteCount: Int64(bytesPerSecond), countStyle: .file) + "/s"
+    let formatter = ByteCountFormatter()
+    formatter.countStyle = .file
+    formatter.allowedUnits = [.useKB, .useMB, .useGB]
+    return formatter.string(fromByteCount: Int64(bytesPerSecond)) + "/s"
 }
 
 // MARK: - The menu
@@ -161,9 +164,14 @@ struct MonitorMenu: View {
                 }
                 .primaryButton()
                 SettingsLink {
-                    Image(systemName: "gearshape").frame(width: 18, height: 18)
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .frame(width: 34, height: 34)
+                        .contentShape(Circle())
                 }
-                .glassButton()
+                .buttonStyle(.plain)
+                .glassPanel(cornerRadius: 17)
                 .accessibilityLabel("Settings")
             }
         }
@@ -324,15 +332,13 @@ private struct SpeedChart: View {
 
     private func line(_ values: [Double], top: Double, size: CGSize) -> Path {
         Path { p in
-            guard values.count > 1 else {
-                p.move(to: CGPoint(x: 0, y: size.height - 1))
-                p.addLine(to: CGPoint(x: size.width, y: size.height - 1))
-                return
-            }
-            let step = size.width / CGFloat(29)
-            let start = CGFloat(30 - values.count) * step
-            for (i, v) in values.enumerated() {
-                let point = CGPoint(x: start + CGFloat(i) * step, y: size.height - 1 - CGFloat(v / top) * (size.height - 2))
+            // Always 30 slots, oldest on the left; slots not measured yet sit on the baseline.
+            let slots = 30
+            let recent = Array(values.suffix(slots))
+            let padded = Array(repeating: 0.0, count: slots - recent.count) + recent
+            let step = size.width / CGFloat(slots - 1)
+            for (i, v) in padded.enumerated() {
+                let point = CGPoint(x: CGFloat(i) * step, y: size.height - 1 - CGFloat(v / top) * (size.height - 2))
                 if i == 0 { p.move(to: point) } else { p.addLine(to: point) }
             }
         }

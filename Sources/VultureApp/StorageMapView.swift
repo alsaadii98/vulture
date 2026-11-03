@@ -28,12 +28,17 @@ struct StorageMapView: View {
             InfoNote(text: "Bigger boxes use more space. Click a box to see what it is and whether it’s safe to remove. Double-click to look inside.")
             HStack(alignment: .top, spacing: 20) {
                 map.frame(maxWidth: .infinity, maxHeight: .infinity)
-                detail.frame(width: 290)
+                ScrollView { detail }
+                    .scrollIndicators(.never)
+                    .frame(width: 290)
+                    .frame(maxHeight: .infinity, alignment: .top)
             }
+            .frame(maxHeight: .infinity)
         }
         .padding(.horizontal, 24)
         .padding(.top, 8)
         .padding(.bottom, 24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .screenBackground()
         .navigationTitle("Storage Map")
         .toolbar {
@@ -183,7 +188,8 @@ struct StorageMapView: View {
                             Image(nsImage: NSWorkspace.shared.icon(forFile: folder.path)).resizable().frame(width: 44, height: 44)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(folderName(folder)).font(.system(size: 17, weight: .bold)).lineLimit(1)
-                                Text("\(formatBytes(total)) · \(items.count) items").font(.system(size: 12)).foregroundStyle(.secondary)
+                                Text(loading && items.isEmpty ? "Measuring…" : "\(formatBytes(total)) · \(items.count) items")
+                                    .font(.system(size: 12)).foregroundStyle(.secondary)
                             }
                         }
                         Text(selected == nil ? "Click a box to see what it is." : "Lots of small items, grouped so the map stays readable. Use List to see each one.")
@@ -291,6 +297,8 @@ private struct BoxesView: View {
                     }
                 }
             }
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+            .clipped()
         }
     }
 
@@ -305,18 +313,18 @@ private struct BoxesView: View {
                 .fill(color.opacity(0.12))
                 .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(selected == item.path ? Theme.accent : .clear, lineWidth: 2))
                 .frame(width: max(0, rect.width - gap), height: max(0, rect.height - gap))
-                .offset(x: rect.x, y: rect.y)
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2) { open(item) }
                 .onTapGesture { select(item) }
                 .accessibilityLabel("\(item.name), \(formatBytes(item.bytes))")
                 .accessibilityAddTraits(.isButton)
+                .position(x: rect.x + (rect.width - gap) / 2, y: rect.y + (rect.height - gap) / 2)
             Text("\(item.name) · \(formatBytes(item.bytes))")
                 .font(.system(size: 12, weight: .semibold))
                 .lineLimit(1)
                 .padding(.horizontal, 8)
-                .frame(width: max(0, rect.width - gap), alignment: .leading)
-                .offset(x: rect.x, y: rect.y + 4)
+                .frame(width: max(0, rect.width - gap), height: 18, alignment: .leading)
+                .position(x: rect.x + (rect.width - gap) / 2, y: rect.y + 13)
                 .allowsHitTesting(false)
             ForEach(Array(zip(inner, innerRects)), id: \.0.path) { child, r in
                 box(child, rect: r, depth: 1)
@@ -340,13 +348,13 @@ private struct BoxesView: View {
         .background(color.opacity(depth == 0 ? 0.22 : 0.26), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(isSelected ? Theme.accent : .clear, lineWidth: 2))
         .clipped()
-        .offset(x: rect.x, y: rect.y)
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { open(item) }
         .onTapGesture { select(item) }
         .help("\(item.name) · \(formatBytes(item.bytes))")
         .accessibilityLabel("\(item.name), \(formatBytes(item.bytes))")
         .accessibilityAddTraits(.isButton)
+        .position(x: rect.x + (rect.width - gap) / 2, y: rect.y + (rect.height - gap) / 2)
     }
 }
 

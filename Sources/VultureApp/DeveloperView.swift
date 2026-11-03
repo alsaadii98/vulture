@@ -85,7 +85,10 @@ struct DeveloperView: View {
     }
 
     private var tools: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 270), spacing: 16, alignment: .top)], alignment: .leading, spacing: 16) {
+        let count = max(1, [hasXcode, model.dev?.docker != nil, !packageRows.isEmpty].filter { $0 }.count)
+        // One column per tool, sharing the width like the design's three cards.
+        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 16, alignment: .top), count: count),
+                         alignment: .leading, spacing: 16) {
             if hasXcode { xcodeCard }
             if model.dev?.docker != nil { dockerCard }
             if !packageRows.isEmpty { packagesCard }
@@ -261,7 +264,8 @@ struct DeveloperView: View {
         let tools = (xcodeRows + packageRows).reduce(0) { $0 + $1.bytes } + (model.dev?.simulators?.bytes ?? 0)
             + (model.dev?.docker?.reclaimableBytes ?? 0)
         let projectsTotal = (model.dev?.projects ?? []).flatMap(\.findings).reduce(0) { $0 + $1.usage.bytes }
-        return "\(formatBytes(tools + projectsTotal)) in coding tools · \(formatBytes(selectedBytes)) selected"
+        let selected = selectedBytes > 0 ? "\(formatBytes(selectedBytes)) selected" : "Nothing selected"
+        return "\(formatBytes(tools + projectsTotal)) in coding tools · \(selected)"
     }
 
     private var confirmTitle: String { "Clean up \(formatBytes(selectedBytes))?" }
@@ -317,7 +321,7 @@ private struct ToolCard<Rows: View, Footer: View>: View {
                     Text(detail).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2)
                 }
                 Spacer(minLength: 8)
-                SizeText(bytes: total, weight: .bold, size: 16)
+                if total > 0 { SizeText(bytes: total, weight: .bold, size: 16) }
             }
             VStack(alignment: .leading, spacing: 0) {
                 Rectangle().fill(Theme.separator).frame(height: 0.5)

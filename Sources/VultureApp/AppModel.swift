@@ -90,6 +90,9 @@ final class AppModel {
         }
         refreshDisk()
         refreshRemoved()
+        #if DEBUG
+        if let section = DebugPreview.section { self.section = section }
+        #endif
         startBackgroundChores()
     }
 

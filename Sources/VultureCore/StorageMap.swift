@@ -28,6 +28,8 @@ public enum Treemap {
         var free = rect
 
         while !items.isEmpty {
+            // Rounding can use up the space before the last tiny items; they get no box rather than an infinite one.
+            guard free.width > 0.01, free.height > 0.01 else { break }
             let side = min(free.width, free.height)
             var row: [(index: Int, area: Double)] = [items.removeFirst()]
             while let next = items.first, worst(row + [next], side: side) <= worst(row, side: side) {
@@ -56,7 +58,11 @@ public enum Treemap {
                 free = Rect(x: free.x, y: free.y + h, width: free.width, height: max(0, free.height - h))
             }
         }
-        return result
+        // Never hand a view an infinite or negative size.
+        return result.map { r in
+            [r.x, r.y, r.width, r.height].allSatisfy(\.isFinite) && r.width >= 0 && r.height >= 0
+                ? r : Rect(x: rect.x, y: rect.y, width: 0, height: 0)
+        }
     }
 
     /// The worst aspect ratio in a row laid along a side of length `side`.

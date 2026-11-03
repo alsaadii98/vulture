@@ -162,7 +162,29 @@ extension LaunchItem {
         ownerAppURL?.deletingPathExtension().lastPathComponent
             ?? appPath.map { URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent }
             ?? homebrewName
-            ?? label
+            ?? programName
+            ?? labelName
+    }
+
+    /// The program's own file name, like "cloudflared", when it isn't a generic launcher.
+    private var programName: String? {
+        guard let program, !program.isEmpty else { return nil }
+        let name = URL(fileURLWithPath: program).lastPathComponent
+        let generic: Set = ["sh", "bash", "zsh", "env", "open", "launcher", "python3", "node", "ruby", "java"]
+        return generic.contains(name.lowercased()) ? nil : Self.readable(name)
+    }
+
+    /// `com.bjango.istatmenus.installer` → "iStat Menus Installer": the meaningful part of a reverse-DNS label.
+    private var labelName: String {
+        let parts = label.split(separator: ".").map(String.init)
+        guard parts.count >= 3 else { return label }
+        let meaningful = parts.dropFirst(2).filter { !["agent", "daemon", "helper", "plist", "launcher"].contains($0.lowercased()) }
+        return Self.readable(meaningful.isEmpty ? parts[parts.count - 1] : meaningful.joined(separator: " "))
+    }
+
+    private static func readable(_ name: String) -> String {
+        let spaced = name.replacingOccurrences(of: "-", with: " ").replacingOccurrences(of: "_", with: " ")
+        return spaced.prefix(1).uppercased() + spaced.dropFirst()
     }
 
     /// `homebrew.mxcl.ollama` → "Ollama (Homebrew service)"
@@ -175,7 +197,11 @@ extension LaunchItem {
     var plainDescription: String {
         if isLeftBehind { return "Its app isn't on this Mac anymore" }
         if keepsRunning { return "Keeps running after you close it" }
-        if let s = intervalSeconds { return s >= 3600 ? "Runs every \(s / 3600) hours" : "Runs every \(max(1, s / 60)) minutes" }
+        if let s = intervalSeconds {
+            if s >= 86_400 { return s / 86_400 == 1 ? "Runs once a day" : "Runs every \(s / 86_400) days" }
+            if s >= 3600 { return s / 3600 == 1 ? "Runs every hour" : "Runs every \(s / 3600) hours" }
+            return s < 120 ? "Runs every minute" : "Runs every \(s / 60) minutes"
+        }
         if runsAtLogin { return scope == .allUsersDaemon ? "Starts when your Mac turns on" : "Opens when you turn on your Mac" }
         return "Runs in the background when an app needs it"
     }

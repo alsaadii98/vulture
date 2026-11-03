@@ -194,9 +194,12 @@ struct InfoNote: View {
     var color: Color = .secondary
 
     var body: some View {
-        Label { Text(text).fixedSize(horizontal: false, vertical: true) } icon: { Image(systemName: symbol) }
+        // Wraps to the available width. No fixedSize here: on screens that don't scroll, a narrow
+        // first layout pass would make the text ask for an enormous height and push the window's content off screen.
+        Label { Text(text) } icon: { Image(systemName: symbol) }
             .font(.system(size: 13))
             .foregroundStyle(color)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

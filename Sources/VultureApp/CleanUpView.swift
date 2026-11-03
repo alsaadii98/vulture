@@ -58,7 +58,7 @@ struct CleanUpView: View {
         .navigationSubtitle(model.selectedBytes > 0 ? "\(formatBytes(model.selectedBytes)) selected" : "")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button("Clean Up \(formatBytes(model.selectedBytes))") { model.confirmingClean = true }
+                Button(model.selectedBytes > 0 ? "Clean Up \(formatBytes(model.selectedBytes))" : "Clean Up") { model.confirmingClean = true }
                     .cleanUpProminent()
                     .disabled(model.selection.isEmpty || isCleaning)
             }

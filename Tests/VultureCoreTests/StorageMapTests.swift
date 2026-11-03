@@ -107,3 +107,17 @@ import Testing
         #expect(line.reclaimableBytes == 6_100_000_000)
     }
 }
+
+@Suite struct TreemapEdgeTests {
+    @Test func neverProducesInfiniteOrNegativeBoxes() {
+        // One huge item and many tiny ones exhaust the space through rounding.
+        let values = [1e12] + Array(repeating: 1.0, count: 200) + [0, -5]
+        let rects = Treemap.squarify(values, in: .init(x: 0, y: 0, width: 700, height: 500))
+        #expect(rects.count == values.count)
+        for r in rects {
+            #expect(r.x.isFinite && r.y.isFinite && r.width.isFinite && r.height.isFinite)
+            #expect(r.width >= 0 && r.height >= 0)
+            #expect(r.x + r.width <= 700.5 && r.y + r.height <= 500.5)
+        }
+    }
+}

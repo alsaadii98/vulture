@@ -21,6 +21,7 @@ struct VultureApp: App {
                 .environment(updates)
                 .frame(minWidth: 900, minHeight: 600)
                 .task { updates.start() }
+                .debugPreviewHook()
                 .sheet(isPresented: $updates.prompting) { UpdateSheet().environment(updates) }
         }
         .defaultSize(width: 1180, height: 760)
@@ -74,11 +75,11 @@ struct VultureApp: App {
         }
 
         Settings {
-            SettingsView().environment(updates).environment(model)
+            SettingsView().environment(updates).environment(model).tint(Theme.accent)
         }
 
         MenuBarExtra(isInserted: $showMenuBarMonitor) {
-            MonitorMenu().environment(monitor)
+            MonitorMenu().environment(monitor).tint(Theme.accent)
         } label: {
             MonitorLabel().environment(monitor)
         }
@@ -91,6 +92,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Started from the command line (swift run) there's no app bundle, so ask to be a regular app.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
+        #if DEBUG
+        DebugPreview.applyAppearance()
+        #endif
     }
 
     /// Keep running for the menu bar item when it's on; otherwise closing the window quits, like before.
