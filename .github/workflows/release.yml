@@ -2,12 +2,17 @@
 # Copyright (C) 2026 Vulture contributors
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Push a tag like v1.0.0 to build, sign, notarize and publish a release.
-# Signing needs these repository secrets; without them the release is signed ad hoc and marked as a pre-release.
-#   DEVELOPER_ID_P12          base64 of the "Developer ID Application" certificate exported as .p12
-#   DEVELOPER_ID_P12_PASSWORD password of that .p12
-#   DEVELOPER_ID_NAME         e.g. "Developer ID Application: Your Name (TEAMID)"
-#   NOTARY_APPLE_ID, NOTARY_TEAM_ID, NOTARY_PASSWORD (an app-specific password)
+# Push a tag like v1.0.0 to build, sign, test the in-app update, publish a release and update the Homebrew tap.
+#
+# Signing, first match wins:
+#   DEVELOPER_ID_P12, DEVELOPER_ID_P12_PASSWORD, DEVELOPER_ID_NAME, NOTARY_APPLE_ID, NOTARY_TEAM_ID, NOTARY_PASSWORD
+#       Apple Developer ID: signed and notarized, no Gatekeeper warning. Before the first release signed this way,
+#       add its requirement to Updater.alsoAccepted in a release signed with the old key, or updates stop.
+#   VULTURE_SIGNING_P12, VULTURE_SIGNING_P12_PASSWORD
+#       Vulture's own release certificate. Not notarized, so a downloaded copy warns once, but the same key
+#       every release lets the app check its updates and lets macOS keep Full Disk Access across updates.
+#   neither: signed ad hoc and published as a pre-release, which the updater never offers.
+# TAP_DEPLOY_KEY: SSH key with write access to alsaadii98/homebrew-vulture.
 
 name: Release
 
@@ -29,28 +34,47 @@ jobs:
         run: swift test
       - name: Set up signing
         env:
-          P12: ${{ secrets.DEVELOPER_ID_P12 }}
-          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
-          NAME: ${{ secrets.DEVELOPER_ID_NAME }}
+          DEVID_P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          DEVID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          DEVID_NAME: ${{ secrets.DEVELOPER_ID_NAME }}
           APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
           TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
           NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+          OWN_P12: ${{ secrets.VULTURE_SIGNING_P12 }}
+          OWN_P12_PASSWORD: ${{ secrets.VULTURE_SIGNING_P12_PASSWORD }}
         run: |
-          if [ -z "$P12" ]; then echo "No signing secrets: building an ad hoc pre-release."; exit 0; fi
+          if [ -z "$DEVID_P12" ] && [ -z "$OWN_P12" ]; then echo "No signing secrets: building an ad hoc pre-release."; exit 0; fi
           keychain="$RUNNER_TEMP/signing.keychain-db"
           security create-keychain -p "" "$keychain"
           security set-keychain-settings -lut 3600 "$keychain"
           security unlock-keychain -p "" "$keychain"
-          echo "$P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
-          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$P12_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple: -s -k "" "$keychain"
           security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
-          rm "$RUNNER_TEMP/cert.p12"
-          xcrun notarytool store-credentials vulture --apple-id "$APPLE_ID" --team-id "$TEAM_ID" --password "$NOTARY_PASSWORD" --keychain "$keychain"
-          echo "VULTURE_SIGN_IDENTITY=$NAME" >> "$GITHUB_ENV"
-          echo "VULTURE_NOTARY_PROFILE=vulture" >> "$GITHUB_ENV"
+          if [ -n "$DEVID_P12" ]; then
+            echo "$DEVID_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+            security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$DEVID_P12_PASSWORD" -T /usr/bin/codesign
+            xcrun notarytool store-credentials vulture --apple-id "$APPLE_ID" --team-id "$TEAM_ID" --password "$NOTARY_PASSWORD" --keychain "$keychain"
+            echo "VULTURE_SIGN_IDENTITY=$DEVID_NAME" >> "$GITHUB_ENV"
+            echo "VULTURE_NOTARY_PROFILE=vulture" >> "$GITHUB_ENV"
+          else
+            echo "$OWN_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+            security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$OWN_P12_PASSWORD" -T /usr/bin/codesign
+            # codesign only uses a trusted certificate. Trust it on this throwaway runner, for code signing only.
+            openssl pkcs12 -in "$RUNNER_TEMP/cert.p12" -passin env:OWN_P12_PASSWORD -nokeys -clcerts -out "$RUNNER_TEMP/cert.pem" \
+              || openssl pkcs12 -legacy -in "$RUNNER_TEMP/cert.p12" -passin env:OWN_P12_PASSWORD -nokeys -clcerts -out "$RUNNER_TEMP/cert.pem"
+            sudo security authorizationdb write com.apple.trust-settings.admin allow
+            sudo security add-trusted-cert -d -r trustRoot -p codeSign -k "$keychain" "$RUNNER_TEMP/cert.pem"
+            echo "VULTURE_SIGN_IDENTITY=Vulture Release Signing" >> "$GITHUB_ENV"
+          fi
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" "$keychain" > /dev/null
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security find-identity -v -p codesigning "$keychain"
       - name: Build release
         run: scripts/release.sh "${GITHUB_REF_NAME#v}"
+      - name: Show signature
+        run: codesign -d -r- build/Vulture.app
+      - name: Test updating to this release
+        if: env.VULTURE_SIGN_IDENTITY != ''
+        run: scripts/test-update.sh "build/release/Vulture-${GITHUB_REF_NAME#v}.zip" "$VULTURE_SIGN_IDENTITY"
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -59,3 +83,25 @@ jobs:
           flags=""
           if [ -z "${VULTURE_SIGN_IDENTITY:-}" ]; then flags="--prerelease"; fi
           gh release create "$GITHUB_REF_NAME" build/release/* --title "Vulture $version" --generate-notes $flags
+      - name: Update Homebrew tap
+        if: env.VULTURE_SIGN_IDENTITY != ''
+        env:
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
+        run: |
+          if [ -z "$TAP_DEPLOY_KEY" ]; then echo "No TAP_DEPLOY_KEY: skipping the Homebrew tap."; exit 0; fi
+          version="${GITHUB_REF_NAME#v}"
+          sha="$(shasum -a 256 "build/release/Vulture-$version.zip" | cut -d' ' -f1)"
+          mkdir -p ~/.ssh
+          echo "$TAP_DEPLOY_KEY" > ~/.ssh/tap_key && chmod 600 ~/.ssh/tap_key
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/tap_key -o StrictHostKeyChecking=accept-new"
+          git clone git@github.com:alsaadii98/homebrew-vulture.git "$RUNNER_TEMP/tap"
+          mkdir -p "$RUNNER_TEMP/tap/Casks"
+          sed -e "s/^  version \".*\"/  version \"$version\"/" -e "s/^  sha256 \".*\"/  sha256 \"$sha\"/" \
+            packaging/homebrew/vulture.rb > "$RUNNER_TEMP/tap/Casks/vulture.rb"
+          cd "$RUNNER_TEMP/tap"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/vulture.rb
+          git commit -m "Vulture $version"
+          git push origin HEAD
+          rm ~/.ssh/tap_key

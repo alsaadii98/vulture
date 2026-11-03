@@ -123,6 +123,8 @@ struct SettingsView: View {
     @AppStorage("showDeveloperFiles") private var showDeveloperFiles = true
     @AppStorage("notifyWhenLow") private var notifyWhenLow = true
     @AppStorage("showMenuBarMonitor") private var showMenuBarMonitor = false
+    @AppStorage(UpdateModel.autoCheckKey) private var checkForUpdates = true
+    @Environment(UpdateModel.self) private var updates
 
     var body: some View {
         Form {
@@ -136,6 +138,12 @@ struct SettingsView: View {
             }
             Section("Reminders") {
                 Toggle("Tell me when there's a lot to clean", isOn: $notifyWhenLow)
+            }
+            Section("Updates") {
+                Toggle("Check for new versions every day", isOn: $checkForUpdates)
+                Text("Vulture asks before installing anything. Checking only reads a small file from GitHub. You have version \(updates.currentVersion).")
+                    .font(.caption).foregroundStyle(.secondary)
+                CheckForUpdatesButton()
             }
             Section {
                 Text("Vulture for Mac · Free and open source · Your files never leave this Mac.")

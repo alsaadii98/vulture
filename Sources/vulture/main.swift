@@ -43,6 +43,7 @@ let usage = """
       vulture rules keygen --out DIR          Make a rule-signing key (maintainers)
       vulture rules pack DIR --version V --key FILE --out FILE
                                               Sign rule files into a pack (maintainers)
+      vulture update [--check] [--yes]        Update Vulture to the newest version
       vulture --version
 
     """
@@ -566,6 +567,41 @@ func emptyCommand() throws {
     }
 }
 
+// MARK: - Updates
+
+final class ResultBox<T>: @unchecked Sendable { var result: Result<T, Error>? }
+
+/// Runs async work from this synchronous tool.
+func waitFor<T: Sendable>(_ work: @escaping @Sendable () async throws -> T) throws -> T {
+    let box = ResultBox<T>()
+    let done = DispatchSemaphore(value: 0)
+    Task {
+        do { box.result = .success(try await work()) } catch { box.result = .failure(error) }
+        done.signal()
+    }
+    done.wait()
+    return try box.result!.get()
+}
+
+func update() throws {
+    let checkOnly = flag("--check")
+    let feed = try option("--feed").map { $0.contains("://") ? URL(string: $0)! : URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) } ?? Updater.feed
+    guard let exe = Bundle.main.executableURL, let app = Updater.app(containing: exe), let current = Updater.version(of: app) else {
+        throw Updater.Problem.notInstalled
+    }
+    guard let info = try waitFor({ try await Updater.check(current: current, feed: feed) }) else {
+        return print("Vulture \(current) is the newest version.")
+    }
+    print("Vulture \(info.version) is available (you have \(current), download \(size(info.size))).")
+    if checkOnly { return }
+    guard confirm("Update \(tilde(app.path)) now?") else { return print("Nothing was changed.") }
+    try waitFor { try await Updater.install(info, replacing: app) }
+    print("Updated to Vulture \(info.version).")
+    if !NSRunningApplication.runningApplications(withBundleIdentifier: Updater.bundleID).isEmpty {
+        print("Vulture is open: quit and reopen it to use the new version.")
+    }
+}
+
 // MARK: - Entry point
 
 do {
@@ -591,6 +627,7 @@ do {
     case "removed": try removed(json: json)
     case "restore": try restore()
     case "empty": try emptyCommand()
+    case "update": try update()
     case "help": print(usage)
     default: throw UsageError(message: "unknown command `\(command)`")
     }

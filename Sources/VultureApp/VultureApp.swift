@@ -10,6 +10,7 @@ struct VultureApp: App {
     @NSApplicationDelegateAdaptor private var delegate: AppDelegate
     @State private var model = AppModel()
     @State private var monitor = MonitorModel()
+    @State private var updates = UpdateModel()
     /// Off unless the person turns it on (Settings › Menu Bar, or first run).
     @AppStorage("showMenuBarMonitor") private var showMenuBarMonitor = false
 
@@ -17,10 +18,16 @@ struct VultureApp: App {
         Window("Vulture", id: "main") {
             ContentView()
                 .environment(model)
+                .environment(updates)
                 .frame(minWidth: 900, minHeight: 600)
+                .task { updates.start() }
+                .sheet(isPresented: $updates.prompting) { UpdateSheet().environment(updates) }
         }
         .defaultSize(width: 1180, height: 760)
         .commands {
+            CommandGroup(after: .appInfo) {
+                CheckForUpdatesButton().environment(updates)
+            }
             CommandGroup(after: .newItem) {
                 Button("Check Again") { Task { await model.scan() } }
                     .keyboardShortcut("r")
@@ -46,7 +53,7 @@ struct VultureApp: App {
         }
 
         Settings {
-            SettingsView()
+            SettingsView().environment(updates)
         }
 
         MenuBarExtra(isInserted: $showMenuBarMonitor) {
