@@ -28,6 +28,7 @@ struct ContentView: View {
                 case .home: HomeView()
                 case .clean: CleanUpView()
                 case .removed: RecentlyRemovedView()
+                case .developer: DeveloperView()
                 case .apps: ComingSoon(section: .apps, text: "See every app with its real size, and remove apps together with the settings and helpers they leave behind.")
                 case .storage: StorageView()
                 case .startup: ComingSoon(section: .startup, text: "See which apps start by themselves and how much they slow your Mac down.")
@@ -47,6 +48,7 @@ struct ContentView: View {
 
 struct Sidebar: View {
     @Environment(AppModel.self) private var model
+    @AppStorage("showDeveloperFiles") private var showDeveloperFiles = true
 
     var body: some View {
         @Bindable var model = model
@@ -54,6 +56,9 @@ struct Sidebar: View {
             ForEach([SidebarSection.home, .clean, .apps, .storage, .startup]) { row($0) }
             Divider()
             row(.removed)
+            if showDeveloperFiles {
+                Section("Extra Tools") { row(.developer) }
+            }
         }
         .safeAreaInset(edge: .bottom) {
             VStack(alignment: .leading, spacing: 6) {

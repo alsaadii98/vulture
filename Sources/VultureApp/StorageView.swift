@@ -56,6 +56,12 @@ struct StorageView: View {
                 }
                 .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
 
+                if !model.snapshots.isEmpty {
+                    Notice(symbol: "clock.arrow.circlepath", text: "macOS is keeping \(model.snapshots.count) Time Machine \(model.snapshots.count == 1 ? "copy" : "copies") on this Mac, the newest from \(model.snapshots[0].formatted(date: .abbreviated, time: .shortened)). They're part of System Data, and macOS removes them by itself when space runs low.") {
+                        EmptyView()
+                    }
+                }
+
                 if report.unreadable > 0 && !model.hasFullDiskAccess {
                     Notice(symbol: "lock.shield", text: "Some folders couldn't be measured, so their space is counted under macOS and System Data. Full Disk Access fixes this.") {
                         Button("Open Settings") { openPrivacySettings() }

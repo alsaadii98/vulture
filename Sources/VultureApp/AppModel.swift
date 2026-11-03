@@ -8,7 +8,7 @@ import SwiftUI
 import VultureCore
 
 enum SidebarSection: String, CaseIterable, Identifiable {
-    case home, clean, apps, storage, startup, removed
+    case home, clean, apps, storage, startup, removed, developer
 
     var id: String { rawValue }
 
@@ -20,6 +20,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         case .storage: "Storage"
         case .startup: "Startup"
         case .removed: "Recently Removed"
+        case .developer: "Developer Files"
         }
     }
 
@@ -31,6 +32,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         case .storage: "chart.pie.fill"
         case .startup: "gauge.with.needle.fill"
         case .removed: "arrow.uturn.backward"
+        case .developer: "hammer.fill"
         }
     }
 
@@ -42,6 +44,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         case .storage: .orange
         case .startup: .pink
         case .removed: .gray
+        case .developer: .indigo
         }
     }
 }
@@ -140,6 +143,73 @@ final class AppModel {
 
     var storage: StorageReport?
     var measuringStorage = false
+    var snapshots: [Date] = []
+
+    // MARK: Developer Files
+
+    struct DevReport: Sendable {
+        var simulators: SimulatorReport?
+        var docker: DockerReport?
+        var projects: [CleanupPlan.Group]
+    }
+
+    var dev: DevReport?
+    var loadingDev = false
+    var devBusy: String?
+    var projectSelection: Set<String> = []
+    var lastProjectResult: CleanupResult?
+
+    func loadDev() async {
+        guard !loadingDev else { return }
+        loadingDev = true
+        let home = home
+        let report = await Task.detached(priority: .userInitiated) {
+            let scanner = DiskScanner(skipping: Privacy.foldersToSkip(home: home))
+            return DevReport(simulators: Simulators.report(home: home, scanner: scanner),
+                             docker: Docker.report(),
+                             projects: ProjectFinder(home: home).groups(policy: SafetyPolicy(home: home), scanner: scanner))
+        }.value
+        dev = report
+        // "You decide" items start unselected, as in Clean Up.
+        projectSelection.formIntersection(report.projects.flatMap(\.findings).map(\.path))
+        loadingDev = false
+    }
+
+    var projectSelectedBytes: Int64 {
+        bytes(of: (dev?.projects ?? []).flatMap(\.findings).filter { projectSelection.contains($0.path) })
+    }
+
+    func cleanProjects() async {
+        guard let groups = dev?.projects, !projectSelection.isEmpty else { return }
+        devBusy = "Removing build folders…"
+        let plan = CleanupPlan(groups: groups, startedAt: Date(), duration: 0)
+        let selected = projectSelection, home = home, store = store
+        lastProjectResult = await Task.detached(priority: .userInitiated) {
+            CleanupExecutor(policy: SafetyPolicy(home: home), store: store, runningApps: { AppModel.runningApps() })
+                .run(plan, selected: selected, title: "Old project build folders")
+        }.value
+        devBusy = nil
+        refreshDisk()
+        await loadDev()
+    }
+
+    func removeSimulators() async {
+        devBusy = "Removing simulators…"
+        let ok = await Task.detached { Simulators.deleteUnavailable() }.value
+        if !ok { problem = "Xcode couldn't remove the simulators." }
+        devBusy = nil
+        refreshDisk()
+        await loadDev()
+    }
+
+    func tidyDocker() async {
+        devBusy = "Tidying up Docker…"
+        let ok = await Task.detached { Docker.tidy() }.value
+        if !ok { problem = "Docker couldn't finish tidying up. Is it still running?" }
+        devBusy = nil
+        refreshDisk()
+        await loadDev()
+    }
 
     func measureStorage() async {
         guard !measuringStorage else { return }
@@ -148,6 +218,7 @@ final class AppModel {
         storage = await Task.detached(priority: .userInitiated) {
             StorageAnalyzer.analyze(home: home, scanner: DiskScanner(skipping: Privacy.foldersToSkip(home: home)))
         }.value
+        snapshots = await Task.detached { TimeMachine.localSnapshots() }.value
         measuringStorage = false
         refreshDisk()
     }

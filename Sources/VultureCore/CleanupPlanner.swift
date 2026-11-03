@@ -32,6 +32,17 @@ public struct CleanupPlan: Codable, Sendable {
         public var rule: Rule
         public var findings: [Finding]
         public var bytes: Int64 { findings.filter { $0.status != .skipped }.reduce(0) { $0 + $1.usage.bytes } }
+
+        public init(rule: Rule, findings: [Finding]) {
+            self.rule = rule
+            self.findings = findings
+        }
+    }
+
+    public init(groups: [Group], startedAt: Date, duration: TimeInterval) {
+        self.groups = groups
+        self.startedAt = startedAt
+        self.duration = duration
     }
 
     public var groups: [Group]

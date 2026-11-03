@@ -13,8 +13,13 @@ let usage = """
 
     Usage:
       vulture scan [--json] [--rules DIR]     Find files that can be cleaned up, and explain each one
-      vulture clean [--include RULE]... [--yes] [--json]
-                                              Clean up the recommended items (add "you decide" rules with --include)
+      vulture clean [--include RULE]... [--projects] [--yes] [--json]
+                                              Clean up the recommended items (add "you decide" rules with --include,
+                                              and build folders of old projects with --projects)
+      vulture projects [--days N] [--json]    Build folders in projects untouched for N days (default 90)
+      vulture dev [--json]                    Xcode simulators, Docker and old projects at a glance
+      vulture dev remove-simulators [--yes]   Remove simulators whose iOS version is gone
+      vulture dev tidy-docker [--yes]         Remove unused Docker images, stopped containers and build cache
       vulture removed [--json]                List what's in Recently Removed
       vulture restore ID [--yes]              Put back everything from one clean-up
       vulture empty [--all] [--yes]           Remove expired clean-ups for good (--all: everything)
@@ -224,9 +229,16 @@ func clean(json: Bool) throws {
     let store = RecentlyRemoved.standard(home: home)
     try store.empty()  // clean-ups past their 30 days go first
 
-    let plan = CleanupPlanner(rules: rules, policy: policy, runningApps: runningBundleIDs())
-        .plan(scanner: DiskScanner(skipping: Privacy.foldersToSkip()))
+    let withProjects = flag("--projects")
+    let days = try option("--days").map { Int($0) ?? 90 } ?? 90
+    let scanner = DiskScanner(skipping: Privacy.foldersToSkip())
+    var plan = CleanupPlanner(rules: rules, policy: policy, runningApps: runningBundleIDs()).plan(scanner: scanner)
     var selected = plan.defaultSelection
+    if withProjects {
+        let projects = ProjectFinder(home: home, untouchedDays: days).groups(policy: policy, scanner: scanner)
+        plan.groups += projects
+        selected.formUnion(projects.flatMap(\.findings).map(\.path))
+    }
     for group in plan.groups where includes.contains(group.rule.id) {
         selected.formUnion(group.findings.filter { $0.status == .youDecide }.map(\.path))
     }
@@ -264,6 +276,66 @@ func clean(json: Bool) throws {
         print("\nLeft alone:")
         for f in result.failures { print("  – \(tilde(f.path)): \(f.reason)") }
     }
+}
+
+func projects(json: Bool) throws {
+    let days = try option("--days").map { v -> Int in
+        guard let n = Int(v), n >= 0 else { throw UsageError(message: "--days needs a number") }
+        return n
+    } ?? 90
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    let groups = ProjectFinder(home: home, untouchedDays: days)
+        .groups(policy: SafetyPolicy(home: home), scanner: DiskScanner(skipping: Privacy.foldersToSkip()))
+    if json { return try printJSON(groups) }
+    guard !groups.isEmpty else { return print("No build folders in projects untouched for \(days) days.") }
+    let total = groups.reduce(0) { $0 + $1.bytes }
+    print("\(size(total)) in build folders of projects untouched for \(days)+ days. Their tools make them again when needed.\n")
+    for g in groups {
+        print("\(padded(g.rule.title, 46)) \(size(g.bytes))")
+        for f in g.findings.prefix(8) {
+            let age = f.usage.newest.map { "\(Int(Date().timeIntervalSince($0) / 86_400)) days" } ?? ""
+            print("    \(padded(tilde(f.path), 60)) \(padded(size(f.usage.bytes), 10)) \(age)")
+        }
+        if g.findings.count > 8 { print("    … and \(g.findings.count - 8) more") }
+    }
+    print("\nTo clean these up: vulture clean --projects")
+}
+
+func dev(json: Bool) throws {
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    if let sub = arguments.first(where: { !$0.hasPrefix("-") }) {
+        switch sub {
+        case "remove-simulators":
+            guard let report = Simulators.report(home: home, scanner: DiskScanner()), !report.unavailable.isEmpty else {
+                return print("No simulators to remove.")
+            }
+            guard confirm("Remove \(report.unavailable.count) simulators whose iOS version is gone (\(size(report.bytes)))?") else { return print("Nothing was changed.") }
+            print(Simulators.deleteUnavailable() ? "Removed. Simulators that still work were kept." : "Xcode couldn't remove them.")
+        case "tidy-docker":
+            guard let report = Docker.report() else { return print("Docker isn't running. Open Docker and try again.") }
+            guard confirm("Remove unused images, stopped containers and build cache (about \(size(report.reclaimableBytes)))? Volumes, which hold data, are kept.") else { return print("Nothing was changed.") }
+            print(Docker.tidy() ? "Done. Docker Desktop gives the space back to macOS gradually." : "Docker couldn't finish tidying up.")
+        default:
+            throw UsageError(message: "unknown dev command `\(sub)`")
+        }
+        return
+    }
+    let scanner = DiskScanner(skipping: Privacy.foldersToSkip())
+    let sims = Simulators.report(home: home, scanner: scanner)
+    let docker = Docker.report()
+    let projects = ProjectFinder(home: home).groups(policy: SafetyPolicy(home: home), scanner: scanner)
+    struct Report: Encodable { let simulators: SimulatorReport?; let docker: DockerReport?; let oldProjects: [CleanupPlan.Group] }
+    if json { return try printJSON(Report(simulators: sims, docker: docker, oldProjects: projects)) }
+
+    print("Xcode simulators")
+    if let sims { print(sims.unavailable.isEmpty ? "  All simulators work." : "  \(sims.unavailable.count) can't be opened anymore: \(size(sims.bytes)). Remove: vulture dev remove-simulators") }
+    else { print("  Xcode isn't set up on this Mac.") }
+    print("\nDocker")
+    if let docker { print("  About \(size(docker.reclaimableBytes)) can be given back. Tidy up: vulture dev tidy-docker") }
+    else { print("  Not installed, or not running.") }
+    print("\nOld projects (untouched for 90+ days)")
+    let total = projects.reduce(0) { $0 + $1.bytes }
+    print(total > 0 ? "  \(size(total)) in build folders. Details: vulture projects" : "  Nothing found.")
 }
 
 func removed(json: Bool) throws {
@@ -315,6 +387,8 @@ do {
     case "scan": try scan(json: json)
     case "size": try sizeCommand(json: json)
     case "storage": try storage(json: json)
+    case "projects": try projects(json: json)
+    case "dev": try dev(json: json)
     case "rules": try rulesCommand(json: json)
     case "check-rules": try checkRules()
     case "clean": try clean(json: json)
