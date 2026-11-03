@@ -12,43 +12,60 @@ struct AppsView: View {
     @State private var showingLeftovers = false
     @State private var confirming = false
 
-    private let columns = [GridItem(.adaptive(minimum: 150, maximum: 190), spacing: 14)]
+    private let columns = [GridItem(.adaptive(minimum: 160, maximum: 220), spacing: 14)]
 
     var body: some View {
         @Bindable var model = model
-        VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    if let busy = model.appsBusy { Working(text: busy, detail: "") }
-                    if let done = model.lastAppsResult {
-                        Label(done, systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-                    }
-                    if !model.leftovers.isEmpty {
-                        Notice(symbol: "trash", text: "**\(model.leftovers.count) apps you already deleted left \(formatBytes(model.leftovers.reduce(0) { $0 + $1.bytes })) behind.** Dragging an app to the Trash doesn't remove its settings and helpers.") {
-                            Button("Review Leftovers") { showingLeftovers = true }
-                        }
-                    }
-                    LazyVGrid(columns: columns, spacing: 14) {
-                        ForEach(model.visibleApps) { AppTile(app: $0) }
-                    }
+        Screen(spacing: 16) {
+            if let busy = model.appsBusy {
+                HStack(spacing: 10) {
+                    ProgressView().controlSize(.small)
+                    Text(busy).font(.system(size: 13, weight: .semibold))
                 }
-                .padding(24)
             }
-            .overlay {
-                if model.apps == nil { ProgressView("Finding your apps…") }
-                else if model.visibleApps.isEmpty { ContentUnavailableView.search(text: model.appSearch) }
+            if let done = model.lastAppsResult {
+                Banner(kind: .success, text: Text(done))
             }
-            if !model.appSelection.isEmpty { selectionBar.transition(.move(edge: .bottom).combined(with: .opacity)) }
+            if !model.leftovers.isEmpty {
+                Banner(kind: .info, symbol: "trash",
+                       text: Text("**\(model.leftovers.count) \(model.leftovers.count == 1 ? "app" : "apps") you already deleted left \(formatBytes(model.leftovers.reduce(0) { $0 + $1.bytes })) behind.** Dragging an app to the Trash doesn't remove its settings and helpers.")) {
+                    Button("Clean Leftovers") { showingLeftovers = true }.glassButton()
+                }
+            }
+            LazyVGrid(columns: columns, spacing: 14) {
+                ForEach(model.visibleApps) { AppTile(app: $0) }
+            }
+            // Room so the last row isn't hidden under the selection bar.
+            if !model.appSelection.isEmpty { Color.clear.frame(height: 72) }
+        }
+        .overlay {
+            if model.apps == nil {
+                ProgressView("Finding your apps…")
+            } else if model.visibleApps.isEmpty {
+                if model.appSearch.isEmpty {
+                    ContentUnavailableView("Nothing here", systemImage: "checkmark.circle", description: Text("No apps match this filter."))
+                } else {
+                    ContentUnavailableView.search(text: model.appSearch)
+                }
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if !model.appSelection.isEmpty {
+                selectionBar.transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
         .animation(.spring(duration: 0.3), value: model.appSelection.isEmpty)
         .navigationTitle("Apps")
         .navigationSubtitle(model.apps.map { "\($0.filter { !$0.isApple }.count) apps on this Mac" } ?? "")
         .searchable(text: $model.appSearch, placement: .toolbar, prompt: "Search Apps")
         .toolbar {
-            Picker("Show", selection: $model.appFilter) {
-                ForEach(AppModel.AppFilter.allCases, id: \.self) { Text($0.rawValue) }
+            ToolbarItem(placement: .primaryAction) {
+                Picker("Show", selection: $model.appFilter) {
+                    ForEach(AppModel.AppFilter.allCases, id: \.self) { Text($0.rawValue) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
             }
-            .pickerStyle(.segmented)
         }
         .task { if model.apps == nil { await model.loadApps() } }
         .sheet(isPresented: $showingDetails) { RemovalDetails() }
@@ -67,27 +84,29 @@ struct AppsView: View {
     }
 
     private var selectionBar: some View {
-        HStack(spacing: 14) {
-            HStack(spacing: -10) {
-                ForEach(model.selectedApps.prefix(4)) { app in
-                    Image(nsImage: NSWorkspace.shared.icon(forFile: app.path)).resizable().frame(width: 32, height: 32)
-                }
+        let apps = model.selectedApps
+        return HStack(spacing: 14) {
+            HStack(spacing: -12) {
+                ForEach(apps.prefix(4)) { app in AppIcon(path: app.path, size: 36) }
             }
-            VStack(alignment: .leading, spacing: 1) {
-                Text("\(model.selectedApps.count) \(model.selectedApps.count == 1 ? "app" : "apps") selected · \(formatBytes(model.appRemovalBytes))")
-                    .font(.body.weight(.semibold))
-                Text("Includes the settings and helpers they keep. You can put them back for 30 days.")
-                    .font(.caption).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(apps.count) \(apps.count == 1 ? "app" : "apps") selected · \(formatBytes(model.appRemovalBytes))")
+                    .font(.system(size: 14, weight: .semibold))
+                Text("Includes the settings and helpers they leave behind. You can put them back for 30 days.")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
             }
-            Spacer()
-            Button("See What Will Be Removed") { showingDetails = true }.buttonStyle(.link)
-            Button(model.selectedApps.count == 1 ? "Remove \(model.selectedApps[0].name)…" : "Remove \(model.selectedApps.count) Apps…") { confirming = true }
-                .buttonStyle(BigButtonStyle())
+            Spacer(minLength: 12)
+            Button("See What Will Be Removed") { showingDetails = true }
+                .buttonStyle(.link)
+                .font(.system(size: 13, weight: .semibold))
+            Button(apps.count == 1 ? "Remove \(apps[0].name)…" : "Remove \(apps.count) Apps…") { confirming = true }
+                .primaryButton()
                 .disabled(model.appsBusy != nil)
         }
-        .padding(.horizontal, 16).padding(.vertical, 12)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-        .padding([.horizontal, .bottom], 16)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .glassPanel(cornerRadius: 16)
+        .padding([.horizontal, .bottom], 20)
     }
 }
 
@@ -100,20 +119,25 @@ struct AppTile: View {
     var body: some View {
         Button { if app.canRemove { model.toggleApp(app) } } label: {
             VStack(spacing: 5) {
-                Image(nsImage: NSWorkspace.shared.icon(forFile: app.path)).resizable().frame(width: 60, height: 60)
-                Text(app.name).font(.callout.weight(.semibold)).lineLimit(1).padding(.top, 4)
-                Text(formatBytes(app.bytes)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                AppIcon(path: app.path, size: 60)
+                Text(app.name).font(.system(size: 13, weight: .semibold)).lineLimit(1).padding(.top, 4)
+                Text(formatBytes(app.bytes)).font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit()
                 usage
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 16).padding(.horizontal, 8)
-            .background(selected ? Color.accentColor.opacity(0.15) : Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+            .padding(.top, 18).padding(.bottom, 14).padding(.horizontal, 10)
+            .background(selected ? Theme.accent.opacity(0.12) : Theme.group, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 14).strokeBorder(selected ? Color.accentColor : .clear, lineWidth: 2)
+                RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(selected ? Theme.accent : .clear, lineWidth: 2)
             }
             .overlay(alignment: .topTrailing) {
                 if selected {
-                    Image(systemName: "checkmark.circle.fill").font(.title3).foregroundStyle(.white, Color.accentColor).padding(8)
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 20, height: 20)
+                        .background(Theme.accent, in: Circle())
+                        .padding(10)
                 } else if !app.canRemove {
                     Image(systemName: "lock.fill").font(.caption).foregroundStyle(.secondary).padding(10)
                         .help("Installed for all users. Removing it needs an administrator: drag it to the Trash in Finder.")
@@ -122,18 +146,26 @@ struct AppTile: View {
             .contentShape(RoundedRectangle(cornerRadius: 14))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(app.name), \(formatBytes(app.bytes))")
+        .accessibilityLabel("\(app.name), \(formatBytes(app.bytes)), \(usageText)")
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private var usageText: String {
+        if AppModel.isUnused(app) {
+            return app.lastUsed.map { "Not used in \(max(2, Int(Date().timeIntervalSince($0) / 86_400 / 30))) months" } ?? "No sign of use"
+        }
+        return app.lastUsed.map { "Used \($0.formatted(.relative(presentation: .named)))" } ?? ""
     }
 
     @ViewBuilder private var usage: some View {
         if AppModel.isUnused(app) {
-            Text(app.lastUsed.map { "Not used in \(max(2, Int(Date().timeIntervalSince($0) / 86_400 / 30))) months" } ?? "No sign of use")
-                .font(.caption2.weight(.semibold)).foregroundStyle(.orange)
-                .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 5))
-        } else if let used = app.lastUsed {
-            Text("Used \(used.formatted(.relative(presentation: .named)))").font(.caption2).foregroundStyle(.secondary)
+            Text(usageText)
+                .font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.orange)
+                .lineLimit(1)
+                .padding(.horizontal, 7).padding(.vertical, 2)
+                .background(Theme.orangeBackground, in: RoundedRectangle(cornerRadius: 6))
+        } else if !usageText.isEmpty {
+            Text(usageText).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
         }
     }
 }
@@ -149,7 +181,7 @@ struct RemovalDetails: View {
                 ForEach(model.selectedApps) { app in
                     Section {
                         HStack {
-                            Image(nsImage: NSWorkspace.shared.icon(forFile: app.path)).resizable().frame(width: 20, height: 20)
+                            AppIcon(path: app.path, size: 20)
                             Text("The app itself")
                             Spacer()
                             Text(formatBytes(app.bytes)).monospacedDigit()
