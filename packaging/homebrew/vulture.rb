@@ -21,7 +21,7 @@ cask "vulture" do
 
   # Vulture checks for new versions itself and asks before installing them.
   auto_updates true
-  depends_on macos: ">= :sonoma"
+  depends_on macos: :sonoma
 
   app "Vulture.app"
   binary "#{appdir}/Vulture.app/Contents/Helpers/vulture"
